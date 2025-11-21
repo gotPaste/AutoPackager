@@ -25,6 +25,7 @@ This README provides a GUI quick start, CLI quick start, and a reference backgro
     - [7) Config](#7-config)
     - [8) Prerequisite Check](#8-prerequisite-check)
     - [9) Help](#9-help)
+    - [10) Scheduled Task](#10-Scheduled-Task)
 - [Config-driven defaults (GUI)](#config-driven-defaults-gui)
 - [Command Line Quick Start](#command-line-quick-start)
   - [Common patterns](#common-patterns)
@@ -180,6 +181,22 @@ This README provides a GUI quick start, CLI quick start, and a reference backgro
 #### 9) Help
 - Loads the content of `readme.txt` into the window
 
+#### 10) Scheduled Task
+Wherever you setup the Scheduled task share the Recipe Folder in the Script location.  This will be used for the Autopackager.config.json file for the RecipeNetworkFolder field.
+- Create a user with rights to all local folders and network paths listed in the AutoPackager.config.json file.
+- Create a Scheduled Task
+  - General Tab
+    - Name: AutoPackager - Nightly Run
+    - Select User Account
+    - Select Run whether user is logged on or not
+    - Select Run with highest privledges
+  - Triggers Tab
+    - Select run schedule (I run it daily at 12:01 AM every day)
+  - Actions Tab
+    - Action: Start a program
+    - Program/Script: c:\windows\system32\WindowsPowerShell\v1.0\powershell.exe
+    - Add arguments (optional): -NoProfile -executionpolicy bypass -file ".\autopackagerv2.ps1" -fullrun -allrecipes
+    - Start in (optional): <PathToScript> (example: D:\AutoPackager)  
 ---
 
 ## Config-driven defaults (GUI)
