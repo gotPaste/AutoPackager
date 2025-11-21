@@ -1,11 +1,12 @@
 # Intune AutoPackager v3
-
 This project streamlines packaging and updating Win32 apps in Microsoft Intune using winget metadata and recipe-driven automation.
+
+## Screenshots
 <img width="1482" height="954" alt="Screenshot 2025-11-21 125201" src="https://github.com/user-attachments/assets/6aace05e-39ab-41e1-9674-78b704db5a55" />
 <img width="1482" height="954" alt="Screenshot 2025-11-21 125201" src="https://github.com/user-attachments/assets/331c5b1d-1617-4f00-b04b-f0488a3fba26" />
-<img width="1482" height="954" alt="Screenshot 2025-11-21 125222" src="https://github.com/user-attachments/assets/68097f98-2a99-4ba4-b309-9daa66406b87" />
+<img width="1482" height="954" alt="Screenshot 2025-11-21 130133" src="https://github.com/user-attachments/assets/745089dc-22ec-4812-bbd9-140a4c90a7c9" />
 
-Two ways to use:
+## Two ways to use:
 - Windows Forms GUI (recommended): `Start-AutoPackagerGUI.ps1`
 - Command line: `AutoPackagerv2.ps1` with flags
 
