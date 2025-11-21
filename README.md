@@ -2,8 +2,8 @@
 This project streamlines packaging and updating Win32 apps in Microsoft Intune using winget metadata and recipe-driven automation.
 
 ## Screenshots
-<img width="1482" height="954" alt="Screenshot 2025-11-21 125201" src="https://github.com/user-attachments/assets/6aace05e-39ab-41e1-9674-78b704db5a55" />
-<img width="1482" height="954" alt="Screenshot 2025-11-21 125201" src="https://github.com/user-attachments/assets/331c5b1d-1617-4f00-b04b-f0488a3fba26" />
+<img width="1482" height="954" alt="Screenshot 2025-11-21 130434" src="https://github.com/user-attachments/assets/0c9d2fb5-c14a-4c16-b3b4-e00da7940122" />
+<img width="1482" height="954" alt="Screenshot 2025-11-21 130447" src="https://github.com/user-attachments/assets/228f93f6-45f5-4a19-8a0c-fe7c559314f9" />
 <img width="1482" height="954" alt="Screenshot 2025-11-21 130133" src="https://github.com/user-attachments/assets/745089dc-22ec-4812-bbd9-140a4c90a7c9" />
 
 ## Two ways to use:
@@ -254,13 +254,10 @@ From the AutoPackager root folder:
 ## Background Process (Reference)
 
 ### 1.0 Identify and verify winget package
-- Use https://winget.run to find the Winget ID (e.g., `zoom.zoom`)
-- Run:
-  ```powershell
-  winget show --id <WingetID>
-  ```
-  to review metadata and installer URL(s)
-- Ensure you will target a machine-scope installer when appropriate (the backend prefers machine scope when available)
+- Use the gui to locate winget packages by searching for part of the name.
+- Review the output and select the appropriate option
+- Select Show Installer YAML
+- Ensure you can target a machine-scope installer
 
 ### 2.0 Test Install and Uninstall
 - Test run the installer to gather and document the install silent switches for the recipe file
