@@ -2,7 +2,7 @@
 This project streamlines packaging and updating Win32 apps in Microsoft Intune using winget metadata and recipe-driven automation.
 
 ## Screenshots
-<img width="746" height="477" alt="Screenshot 2025-11-21 130434" src="https://github.com/user-attachments/assets/0c9d2fb5-c14a-4c16-b3b4-e00da7940122" />
+<img width="373" height="238" alt="Screenshot 2025-11-21 130434" src="https://github.com/user-attachments/assets/0c9d2fb5-c14a-4c16-b3b4-e00da7940122" />
 <img width="1482" height="954" alt="Screenshot 2025-11-21 130447" src="https://github.com/user-attachments/assets/228f93f6-45f5-4a19-8a0c-fe7c559314f9" />
 <img width="1482" height="954" alt="Screenshot 2025-11-21 130133" src="https://github.com/user-attachments/assets/745089dc-22ec-4812-bbd9-140a4c90a7c9" />
 
