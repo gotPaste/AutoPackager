@@ -53,7 +53,12 @@ This README provides a GUI quick start, CLI quick start, and a reference backgro
     - `AZInfo.csv` next to `AutoPackager.ps1`, or
     - `AutoPackager.config.json` (AzureAuth), or
     - CLI parameters to `AutoPackager.ps1`
-
+  - Create a GitHub PAT Token (will be needed or you will hit api limits with GitHub when running AutoPackager)
+  - Setup Automation
+    - Automation Account
+      - Create a local windows account or domain service account that can be used as the account for the scheduled task.  System may work too, but if you do not choose a domain account you will not be able to archive to a network folder (setup in the autopackager.config.json file.   
+    - Scheduled task (#10-Scheduled-Task)
+      - Create a new Scheduled task on a workstation or server that will run Autopackager and read the recipes nightly.
 ---
 
 ## GUI Quick Start
