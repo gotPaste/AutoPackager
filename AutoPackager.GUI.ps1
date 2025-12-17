@@ -1149,6 +1149,8 @@ $btnWingetRun.Add_Click({
     try {
       if ($tbSource -and $tbSource.Text -and $tbSource.Text.Trim()) { $args['Source'] = $tbSource.Text.Trim() }
     } catch {}
+    # Default to 'winget' source if none specified
+    if (-not $args.ContainsKey('Source') -or -not $args['Source'] -or [string]::IsNullOrWhiteSpace($args['Source'])) { $args['Source'] = 'winget' }
 
     $cmdMsg = "Find-WinGetPackage -Query `"$q`""
     try { if ($args.ContainsKey('Source')) { $cmdMsg += " -Source `"$($args['Source'])`"" } } catch {}
