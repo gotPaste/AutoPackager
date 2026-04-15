@@ -959,10 +959,9 @@ $lvWingetResults.Anchor = 'Top,Left,Right,Bottom'
 $lvWingetResults.View   = 'Details'
 $lvWingetResults.FullRowSelect = $true
 $lvWingetResults.HideSelection = $false
-# Columns: Name, Id, Version, Source
+# Columns: Name, Id, Source
 [void]$lvWingetResults.Columns.Add('Name', 260)
 [void]$lvWingetResults.Columns.Add('Id', 280)
-[void]$lvWingetResults.Columns.Add('Version', 120)
 [void]$lvWingetResults.Columns.Add('Source', 120)
 $lvWingetResults.Visible = $false
 $tabWinget.Controls.Add($lvWingetResults)
@@ -1170,14 +1169,12 @@ $btnWingetRun.Add_Click({
       foreach ($r in $results) {
         $id  = ''
         $nm  = ''
-        $ver = ''
         $src = ''
         try { if ($r.Id) { $id = [string]$r.Id } } catch {}
         try { if (-not $id -and $r.PackageIdentifier) { $id = [string]$r.PackageIdentifier } } catch {}
         try { if ($r.Name) { $nm = [string]$r.Name } } catch {}
-        try { if ($r.Version) { $ver = [string]$r.Version } } catch {}
         try { if ($r.Source) { $src = [string]$r.Source } } catch {}
-        if ($id -or $nm) { $items += [pscustomobject]@{ Name=$nm; Id=$id; Version=$ver; Source=$src } }
+        if ($id -or $nm) { $items += [pscustomobject]@{ Name=$nm; Id=$id; Source=$src } }
       }
     }
 
@@ -1205,11 +1202,9 @@ $btnWingetRun.Add_Click({
       foreach ($it in $items) {
         $nameText = if ($it.Name) { [string]$it.Name } elseif ($it.DisplayName) { [string]$it.DisplayName } else { '' }
         $idText   = if ($it.Id) { [string]$it.Id } else { '' }
-        $verText  = if ($it.Version) { [string]$it.Version } else { '' }
         $srcText  = if ($it.Source) { [string]$it.Source } else { '' }
         $lvi = New-Object System.Windows.Forms.ListViewItem($nameText)
         [void]$lvi.SubItems.Add($idText)
-        [void]$lvi.SubItems.Add($verText)
         [void]$lvi.SubItems.Add($srcText)
         $lvi.Tag = $it
         [void]$lvWingetResults.Items.Add($lvi)
@@ -1423,6 +1418,8 @@ $btnResetAppIds.Add_Click({
   try { $tbAppsSecId.Text = '' } catch {}
   try { $tbIntuneId.Text = '' } catch {}
   try { $tbSecondary.Text = '' } catch {}
+  try { $tbPrim.Text = '' } catch {}
+  try { $tbSecId.Text = '' } catch {}
 })
 $grpAppIds.Controls.AddRange(@($lblPrimAppId,$tbAppsPrimId,$lblSecAppId,$tbAppsSecId,$btnResetAppIds))
 $tabApps.Controls.Add($grpAppIds)

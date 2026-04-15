@@ -28,6 +28,7 @@ if (-not (Test-Path -LiteralPath $guiPath)) {
 $argList = @(
   '-NoProfile',
   '-ExecutionPolicy','Bypass',
+  '-WindowStyle','Hidden',
   '-STA',
   '-File', ('"{0}"' -f $guiPath)
 )

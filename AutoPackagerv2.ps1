@@ -181,7 +181,12 @@ if (-not $LogPath -or [string]::IsNullOrWhiteSpace($LogPath)) {
 # Always attempt to send a summary email at the end of the run.
 # Secrets: Prefer setting SENDGRID_API_KEY environment variable; otherwise you will be prompted once per run.
 $EmailTo = if ($script:Config -and $script:Config.Email -and $script:Config.Email.To) { @($script:Config.Email.To) } else { @() }
-$EmailFrom = if ($script:Config -and $script:Config.Email -and $script:Config.Email.From) { [string]$script:Config.Email.From } else { $null }
+# Patch: Set $EmailFrom for Graph provider from MailSendMailbox
+if ($script:Config -and $script:Config.Email -and $script:Config.Email.Provider -eq 'graph' -and $script:Config.Email.Graph -and $script:Config.Email.Graph.MailSendMailbox) {
+    $EmailFrom = [string]$script:Config.Email.Graph.MailSendMailbox
+} else {
+    $EmailFrom = if ($script:Config -and $script:Config.Email -and $script:Config.Email.From) { [string]$script:Config.Email.From } else { $null }
+}
 $SmtpServer = if ($script:Config -and $script:Config.Email -and $script:Config.Email.Smtp -and $script:Config.Email.Smtp.Server) { [string]$script:Config.Email.Smtp.Server } else { $null }
 $SmtpPort = if ($script:Config -and $script:Config.Email -and $script:Config.Email.Smtp -and $script:Config.Email.Smtp.Port) { [int]$script:Config.Email.Smtp.Port } else { 587 }
 $SmtpUseSsl = if ($script:Config -and $script:Config.Email -and $script:Config.Email.Smtp -and ($null -ne $script:Config.Email.Smtp.UseSsl)) { [bool]$script:Config.Email.Smtp.UseSsl } else { $true }
@@ -379,6 +384,50 @@ function ConvertTo-PlainText {
     if (-not $Secure) { return $null }
     $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Secure)
     try { return [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+}
+
+function Send-GraphMail {
+    param(
+        [Parameter(Mandatory=$true)][string[]]$To,
+        [Parameter(Mandatory=$true)][string]$From,
+        [Parameter(Mandatory=$true)][string]$Subject,
+        [Parameter(Mandatory=$true)][string]$Body
+    )
+    $graphCfg = $script:Config.Email.Graph
+    $tenantId = $graphCfg.TenantId
+    $clientId = $graphCfg.ClientId
+    $clientSecret = $graphCfg.ClientSecret
+    $mailbox = $graphCfg.MailSendMailbox
+    $scope = $graphCfg.Scope
+    $grantType = $graphCfg.GrantType
+
+    $tok = Invoke-RestMethod -Method POST `
+        -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token" `
+        -ContentType "application/x-www-form-urlencoded" `
+        -Body @{
+            client_id     = $clientId
+            client_secret = $clientSecret
+            scope         = $scope
+            grant_type    = $grantType
+        }
+    $headers = @{
+        Authorization  = "Bearer $($tok.access_token)"
+        "Content-Type" = "application/json"
+    }
+    $recipients = @($To | ForEach-Object { @{ emailAddress = @{ address = $_ } } })
+    $payload = @{
+        message = @{
+            subject      = $Subject
+            body         = @{ contentType = "HTML"; content = $Body }
+            toRecipients = $recipients
+        }
+        saveToSentItems = $true
+    } | ConvertTo-Json -Depth 10
+    $mailboxEncoded = [System.Uri]::EscapeDataString($mailbox)
+    Invoke-RestMethod -Method POST `
+        -Uri "https://graph.microsoft.com/v1.0/users/$mailboxEncoded/sendMail" `
+        -Headers $headers `
+        -Body $payload
 }
 
 function Ensure-Dir([string]$Path) {
@@ -2552,7 +2601,7 @@ function Sanitize-ForPath([string]`$s){
 }
 `$AppName  = Sanitize-ForPath `$AppNameRaw
 `$AppVer   = Sanitize-ForPath `$AppVersionRaw
-`$LogRoot  = 'C:\ProgramData\Microsoft\IntuneManagementExtension\Logs'
+`$LogRoot  = 'C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\Apps'
 `$AppLogDir = Join-Path `$LogRoot `$AppName
 try { `$null = New-Item -ItemType Directory -Path `$AppLogDir -Force -ErrorAction Stop } catch { `$AppLogDir = Join-Path `$env:TEMP `$AppName; `$null = New-Item -ItemType Directory -Path `$AppLogDir -Force -ErrorAction SilentlyContinue }
 `$Stamp   = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -2980,7 +3029,7 @@ function Sanitize-ForPath([string]`$s){
 }
 `$AppName  = Sanitize-ForPath `$AppNameRaw
 `$AppVer   = Sanitize-ForPath `$AppVersionRaw
-`$LogRoot  = 'C:\ProgramData\Microsoft\IntuneManagementExtension\Logs'
+`$LogRoot  = 'C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\Apps'
 `$AppLogDir = Join-Path `$LogRoot `$AppName
 try { `$null = New-Item -ItemType Directory -Path `$AppLogDir -Force -ErrorAction Stop } catch { `$AppLogDir = Join-Path `$env:TEMP `$AppName; `$null = New-Item -ItemType Directory -Path `$AppLogDir -Force -ErrorAction SilentlyContinue }
 `$Stamp   = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -3836,7 +3885,7 @@ function Sanitize-ForPath([string]`$s){
 }
 `$AppName  = Sanitize-ForPath `$AppNameRaw
 `$AppVer   = Sanitize-ForPath `$AppVersionRaw
-`$LogRoot  = 'C:\ProgramData\Microsoft\IntuneManagementExtension\Logs'
+`$LogRoot  = 'C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\Apps'
 `$AppLogDir = Join-Path `$LogRoot `$AppName
 try { `$null = New-Item -ItemType Directory -Path `$AppLogDir -Force -ErrorAction Stop } catch { `$AppLogDir = Join-Path `$env:TEMP `$AppName; `$null = New-Item -ItemType Directory -Path `$AppLogDir -Force -ErrorAction SilentlyContinue }
 `$Stamp   = Get-Date -Format 'yyyyMMdd_HHmmss'
@@ -5708,7 +5757,9 @@ try {
         default { $shouldSend = (($updates.Count -gt 0) -or ($failures.Count -gt 0)) }
     }
 
-    if ($EmailEnabled -and $EmailTo -and $EmailFrom -and $SmtpServer -and $shouldSend) {
+    $provider = $null
+    try { if ($script:Config -and $script:Config.Email -and $script:Config.Email.Provider) { $provider = [string]$script:Config.Email.Provider } } catch {}
+    if ($EmailEnabled -and $EmailTo -and $EmailFrom -and $shouldSend) {
         # Build HTML rows
         $htmlRowsUpdates = ($updates | ForEach-Object {
             "<tr><td>$($_.App)</td><td>$($_.Intune)</td><td>$($_.Winget)</td><td>$($_.Notes)</td></tr>"
@@ -5755,43 +5806,54 @@ try {
 </html>
 "@
 
-        $mail = New-Object System.Net.Mail.MailMessage
-        $mail.From = $EmailFrom
-        foreach($to in $EmailTo){ if ($to) { [void]$mail.To.Add($to) } }
-        $mail.Subject = $subject
-        $mail.Body = $body
-        $mail.IsBodyHtml = $true
-        # Optional CSV attachment per config
-        try {
-            if ($EmailAttachCsv -and $csv -and (Test-Path -LiteralPath $csv)) {
-                [void]$mail.Attachments.Add([System.Net.Mail.Attachment]::new($csv))
-            }
-        } catch {
-            Write-Log ("Unable to attach CSV: {0}" -f $_.Exception.Message) 'WARN'
-        }
-
-        # Attach log only on failures; attach a copy to avoid file lock conflicts
-        if ($EmailAttachLog -and ($failures.Count -gt 0) -and $LogPath -and (Test-Path -LiteralPath $LogPath)) {
+        if ($provider -and $provider.ToLower() -eq "graph") {
             try {
-                $logCopy = Join-Path $WorkingRoot ("AutoPackager_{0:yyyyMMdd_HHmmss}.log" -f (Get-Date))
-                Copy-Item -LiteralPath $LogPath -Destination $logCopy -Force
-                [void]$mail.Attachments.Add([System.Net.Mail.Attachment]::new($logCopy))
+                Send-GraphMail -To $EmailTo -From $EmailFrom -Subject $subject -Body $body
+                Write-Log ("Summary email sent via Graph to: {0}" -f ($EmailTo -join ', ')) 'INFO'
             } catch {
-                Write-Log ("Unable to attach log: {0}" -f $_.Exception.Message) 'WARN'
+                Write-Log ("Failed to send summary email via Graph: {0}" -f $_.Exception.Message) 'WARN'
             }
-        }
+        } elseif ($SmtpServer) {
+            $mail = New-Object System.Net.Mail.MailMessage
+            $mail.From = $EmailFrom
+            foreach($to in $EmailTo){ if ($to) { [void]$mail.To.Add($to) } }
+            $mail.Subject = $subject
+            $mail.Body = $body
+            $mail.IsBodyHtml = $true
+            # Optional CSV attachment per config
+            try {
+                if ($EmailAttachCsv -and $csv -and (Test-Path -LiteralPath $csv)) {
+                    [void]$mail.Attachments.Add([System.Net.Mail.Attachment]::new($csv))
+                }
+            } catch {
+                Write-Log ("Unable to attach CSV: {0}" -f $_.Exception.Message) 'WARN'
+            }
 
-        $smtp = New-Object System.Net.Mail.SmtpClient($SmtpServer, $SmtpPort)
-        $smtp.EnableSsl = [bool]$SmtpUseSsl
-        if ($SmtpUser) {
-            $smtp.Credentials = New-Object System.Net.NetworkCredential($SmtpUser, (ConvertTo-PlainText $SmtpPassword))
+            # Attach log only on failures; attach a copy to avoid file lock conflicts
+            if ($EmailAttachLog -and ($failures.Count -gt 0) -and $LogPath -and (Test-Path -LiteralPath $LogPath)) {
+                try {
+                    $logCopy = Join-Path $WorkingRoot ("AutoPackager_{0:yyyyMMdd_HHmmss}.log" -f (Get-Date))
+                    Copy-Item -LiteralPath $LogPath -Destination $logCopy -Force
+                    [void]$mail.Attachments.Add([System.Net.Mail.Attachment]::new($logCopy))
+                } catch {
+                    Write-Log ("Unable to attach log: {0}" -f $_.Exception.Message) 'WARN'
+                }
+            }
+
+            $smtp = New-Object System.Net.Mail.SmtpClient($SmtpServer, $SmtpPort)
+            $smtp.EnableSsl = [bool]$SmtpUseSsl
+            if ($SmtpUser) {
+                $smtp.Credentials = New-Object System.Net.NetworkCredential($SmtpUser, (ConvertTo-PlainText $SmtpPassword))
+            } else {
+                $smtp.UseDefaultCredentials = $true
+            }
+
+            $smtp.Send($mail)
+            Write-Log ("Summary email sent to: {0}" -f ($EmailTo -join ', ')) 'INFO'
+            try { $mail.Dispose(); $smtp.Dispose() } catch {}
         } else {
-            $smtp.UseDefaultCredentials = $true
+            Write-Log "Email not sent (disabled by conditions or missing parameters)." 'DEBUG'
         }
-
-        $smtp.Send($mail)
-        Write-Log ("Summary email sent to: {0}" -f ($EmailTo -join ', ')) 'INFO'
-        try { $mail.Dispose(); $smtp.Dispose() } catch {}
     } else {
         Write-Log "Email not sent (disabled by conditions or missing parameters)." 'DEBUG'
     }
