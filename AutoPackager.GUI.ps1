@@ -1291,7 +1291,8 @@ $btnWingetDownload.Add_Click({
     $verSafe = Sanitize-Leaf $version
 
     $root = Join-Path $ScriptRoot 'Testing'
-    $targetDir = Join-Path (Join-Path (Join-Path $root $pubSafe) $nameSafe) $verSafe
+    $archSafe = Sanitize-Leaf $archSel
+    $targetDir = Join-Path (Join-Path (Join-Path (Join-Path $root $pubSafe) $nameSafe) $verSafe) $archSafe
     $null = New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction SilentlyContinue
 
     # Derive filename from URL
@@ -2345,9 +2346,18 @@ $btnNewFromWinget.Add_Click({
     [System.Windows.Forms.MessageBox]::Show("New-RecipeFromWinget.ps1 not found:`r`n$PathNewRecipe","Missing",0,[System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null; return
   }
 
-  # Determine expected recipe path and handle existing file
+  # Determine expected recipe path and handle existing file (include architecture in filename)
   $expected = $null
-  try { if ($PathRecipesDefault) { $expected = Join-Path $PathRecipesDefault ("{0}.json" -f $id) } } catch {}
+  try {
+    # Determine architecture selection for naming
+    $archSel = 'x64'
+    try {
+      if ($cbArchWinget -and $cbArchWinget.SelectedItem) { $archSel = [string]$cbArchWinget.SelectedItem }
+      elseif ($script:PreferArchitecture) { $archSel = [string]$script:PreferArchitecture }
+    } catch {}
+    $archSafe = Sanitize-Leaf $archSel
+    if ($PathRecipesDefault) { $expected = Join-Path $PathRecipesDefault ("{0}.{1}.json" -f $id, $archSafe) }
+  } catch {}
   if ($expected -and (Test-Path -LiteralPath $expected)) {
     $text = "A recipe already exists:`r`n$expected`r`n`r`nWhat would you like to do?`r`n`r`nYes = Load existing into GUI`r`nNo = Overwrite`r`nCancel = Abort"
     $dr = [System.Windows.Forms.MessageBox]::Show($text, "Recipe Exists", [System.Windows.Forms.MessageBoxButtons]::YesNoCancel, [System.Windows.Forms.MessageBoxIcon]::Warning)
@@ -2375,7 +2385,17 @@ $btnNewFromWinget.Add_Click({
   $loc = 'en-US'
   try { if ($tbLocale -and $tbLocale.Text -and $tbLocale.Text.Trim()) { $loc = $tbLocale.Text.Trim() } } catch {}
 
-  $cmd = "& `"$PathNewRecipe`" -wingetid `"$id`" -Architecture $archSel -Locale `"$loc`""
+  # Build output filename (include architecture) and invoke generator with explicit output args
+  try {
+    $outFile = ("{0}.{1}.json" -f $id, $archSafe)
+  } catch {
+    $outFile = ("{0}.json" -f $id)
+  }
+  if ($PathRecipesDefault) {
+    $cmd = "& `"$PathNewRecipe`" -wingetid `"$id`" -Architecture $archSel -Locale `"$loc`" -OutputDir `"$PathRecipesDefault`" -OutputFile `"$outFile`""
+  } else {
+    $cmd = "& `"$PathNewRecipe`" -wingetid `"$id`" -Architecture $archSel -Locale `"$loc`" -OutputFile `"$outFile`""
+  }
   $res = Invoke-PSCapture -Command $cmd -NoProfile
   $msg = "Recipe generation completed."
   if ($res.ExitCode -ne 0) { $msg = "Recipe generation finished with exit code $($res.ExitCode)." }

@@ -1964,7 +1964,19 @@ function Generate-DetectionScriptFile {
     try {
         $sanName = ($AppName -replace '[\\/:*?"<>|]','_')
         $sanVer  = ($RequiredVersion -replace '[\\/:*?"<>|]','_')
-        $verBase = if ($VersionRootPath -and $VersionRootPath.Trim()) { Ensure-Dir $VersionRootPath } else { Ensure-Dir (Join-Path (Ensure-Dir (Join-Path $WorkingRoot $sanName)) $sanVer) }
+        if ($VersionRootPath -and $VersionRootPath.Trim()) {
+            $verBase = Ensure-Dir $VersionRootPath
+        } else {
+            # Determine architecture folder (prefer explicit parameter, then config fallback, default to x64)
+            $arch = if ($PreferArchitecture -and $PreferArchitecture.Trim()) {
+                $PreferArchitecture
+            } elseif ($script:Config -and $script:Config.PackagingDefaults -and $script:Config.PackagingDefaults.PreferArchitecture) {
+                [string]$script:Config.PackagingDefaults.PreferArchitecture
+            } else {
+                'x64'
+            }
+            $verBase = Ensure-Dir (Join-Path (Ensure-Dir (Join-Path (Ensure-Dir (Join-Path $WorkingRoot $sanName)) $sanVer)) $arch)
+        }
         $work = Ensure-Dir (Join-Path $verBase 'Scripts')
         $detectPath = Join-Path $work "$($sanName)_Detect.ps1"
         $content = @"
@@ -2087,7 +2099,17 @@ function Update-DetectionScriptIfPossible {
     # Place detection script under Working\<AppName>\<Version>\Scripts
     $sanName = ($AppName -replace '[\\/:*?"<>|]','_')
     $sanVer  = ($RequiredVersion -replace '[\\/:*?"<>|]','_')
-    $verBase = if ($VersionRootPath -and $VersionRootPath.Trim()) { Ensure-Dir $VersionRootPath } else { Ensure-Dir (Join-Path (Ensure-Dir (Join-Path $WorkingRoot $sanName)) $sanVer) }
+$verBase = if ($VersionRootPath -and $VersionRootPath.Trim()) { Ensure-Dir $VersionRootPath } else {
+    # Determine architecture folder (prefer explicit parameter, then config fallback, default to x64)
+    $arch = if ($PreferArchitecture -and $PreferArchitecture.Trim()) {
+        $PreferArchitecture
+    } elseif ($script:Config -and $script:Config.PackagingDefaults -and $script:Config.PackagingDefaults.PreferArchitecture) {
+        [string]$script:Config.PackagingDefaults.PreferArchitecture
+    } else {
+        'x64'
+    }
+    Ensure-Dir (Join-Path (Ensure-Dir (Join-Path (Ensure-Dir (Join-Path $WorkingRoot $sanName)) $sanVer)) $arch)
+}
     $work = Ensure-Dir (Join-Path $verBase 'Scripts')
     $detectPath = Join-Path $work "$($sanName)_Detect.ps1"
     $content = @"
@@ -4767,7 +4789,17 @@ if ($cmp -le 0) {
     $pubRoot    = Ensure-Dir (Join-Path $WorkingRoot $pubSafe)
     $appWork    = Ensure-Dir (Join-Path $pubRoot $appSafe)
     $verRoot    = Ensure-Dir (Join-Path $appWork $verSafe)
-    $downloadDir = Ensure-Dir (Join-Path $verRoot 'Download')
+    
+    # Compute architecture folder for this version (recipe preference -> CLI -> config -> default x64)
+    $archChoice = $null
+    try {
+        if ($archPref -and $archPref.Trim()) { $archChoice = $archPref }
+        elseif ($PreferArchitecture -and $PreferArchitecture.Trim()) { $archChoice = $PreferArchitecture }
+        elseif ($script:Config -and $script:Config.PackagingDefaults -and $script:Config.PackagingDefaults.PreferArchitecture) { $archChoice = [string]$script:Config.PackagingDefaults.PreferArchitecture }
+    } catch { }
+    if (-not $archChoice -or [string]::IsNullOrWhiteSpace($archChoice)) { $archChoice = 'x64' }
+    $archRoot = Ensure-Dir (Join-Path $verRoot $archChoice)
+    $downloadDir = Ensure-Dir (Join-Path $archRoot 'Download')
     # Normalize SourceForge URL to direct mirror so filename isn't just 'download'
     try {
         if ($installerUrl -match '^(?i)https?://sourceforge\.net/projects?/([^/]+)/files/(.+?)/download/?$') {
@@ -4888,17 +4920,17 @@ if ($cmp -le 0) {
     } catch { $maxDelayDays = 0 }
     $deferralHoursTotal = ([int]$deferralHours) + ([int]$maxDelayDays * 24)
 
-    Generate-InstallScript -VersionRoot $verRoot -DownloadDir $downloadDir -InstallerName $installerName -InstallArgs $installArgsFromRecipe -ForceTaskCloseSpec $forceTaskCloseSpec -AppNameForLogs $resolvedName -AppVersionForLogs $wingetVersion -NotificationPopupFlag $notifEnabled -ProductCode $productCode -ForceUninstallFlag ([bool]$recipeJson.ForceUninstall) -UninstallArgsPre $uninstallArgsFromRecipe -NotificationTimeoutSeconds $notifTimeout -DeferralHoursAllowed $deferralHoursTotal -DeferralAllowed $deferralEnabled
-    Generate-UninstallScript -VersionRoot $verRoot -DownloadDir $downloadDir -InstallerName $installerName -UninstallArgs $uninstallArgsFromRecipe -ForceTaskCloseSpec $forceTaskCloseSpec -ProductCode $productCode -AppNameForLogs $resolvedName -AppVersionForLogs $wingetVersion
+    Generate-InstallScript -VersionRoot $archRoot -DownloadDir $downloadDir -InstallerName $installerName -InstallArgs $installArgsFromRecipe -ForceTaskCloseSpec $forceTaskCloseSpec -AppNameForLogs $resolvedName -AppVersionForLogs $wingetVersion -NotificationPopupFlag $notifEnabled -ProductCode $productCode -ForceUninstallFlag ([bool]$recipeJson.ForceUninstall) -UninstallArgsPre $uninstallArgsFromRecipe -NotificationTimeoutSeconds $notifTimeout -DeferralHoursAllowed $deferralHoursTotal -DeferralAllowed $deferralEnabled
+    Generate-UninstallScript -VersionRoot $archRoot -DownloadDir $downloadDir -InstallerName $installerName -UninstallArgs $uninstallArgsFromRecipe -ForceTaskCloseSpec $forceTaskCloseSpec -ProductCode $productCode -AppNameForLogs $resolvedName -AppVersionForLogs $wingetVersion
 
     # Generate detection script file for both PackageOnly and full runs
-    $null = Generate-DetectionScriptFile -AppName $resolvedName -RequiredVersion $wingetVersion -ProductCode $productCode -VersionRootPath $verRoot
+    $null = Generate-DetectionScriptFile -AppName $resolvedName -RequiredVersion $wingetVersion -ProductCode $productCode -VersionRootPath $archRoot
 # Generate requirement script file for both PackageOnly and full runs
-$null = Update-RequirementRuleIfPossible -AppId $null -AppName $resolvedName -VersionRootPath $verRoot
+$null = Update-RequirementRuleIfPossible -AppId $null -AppName $resolvedName -VersionRootPath $archRoot
 # Generate NOT-installed requirement script for primary (used only in FullRun application)
-$reqNotInstalledPath = Generate-RequirementNotInstalledScript -AppName $resolvedName -VersionRootPath $verRoot
+$reqNotInstalledPath = Generate-RequirementNotInstalledScript -AppName $resolvedName -VersionRootPath $archRoot
 
-    $outDir  = Ensure-Dir (Join-Path $verRoot 'Output')
+    $outDir  = Ensure-Dir (Join-Path $archRoot 'Output')
     $outDirPkg = Ensure-Dir (Join-Path $outDir 'Package')
     $intunewin = Wrap-IntuneWin -SourceDir $downloadDir -SetupFileName 'install.ps1' -OutputDir $outDirPkg
 
@@ -5129,7 +5161,18 @@ try {
 
                 # DisplayName "<winget name> <winget version>" (prefer parsed winget Name)
                 $resolvedName = if ($wg -and $wg.Name) { $wg.Name } elseif ($appName) { $appName } else { $wingetId }
-                $displayNameValue = "$resolvedName $wingetVersion"
+                # Determine architecture to include in display name (recipe JSON -> winget manifest -> preferArchitecture)
+                $archForDisplay = $null
+                try {
+                    if ($recipeJson -and $recipeJson.InstallerPreferences -and $recipeJson.InstallerPreferences.Architecture) { $archForDisplay = [string]$recipeJson.InstallerPreferences.Architecture }
+                    elseif ($wg -and $wg.Architecture) { $archForDisplay = [string]$wg.Architecture }
+                    elseif ($PreferArchitecture) { $archForDisplay = [string]$PreferArchitecture }
+                } catch {}
+                if ($archForDisplay -and $archForDisplay.Trim()) {
+                    $displayNameValue = "$resolvedName $wingetVersion ($archForDisplay)"
+                } else {
+                    $displayNameValue = "$resolvedName $wingetVersion"
+                }
                 if ($cmdSet.Parameters.Keys -contains 'DisplayName') {
                     $params['DisplayName'] = $displayNameValue
                 }
@@ -5359,7 +5402,18 @@ if ($cmdSet.Parameters.Keys -contains 'Notes') {
                         $secSuffix = [string]$script:Config.Secondary.DisplayNameSuffix
                     }
                 } catch {}
-                $displayNameSec = "$resolvedNameForDisplay $wingetVersion$secSuffix"
+                # Determine architecture to include in secondary display name (recipe JSON -> winget manifest -> preferArchitecture)
+                $archForDisplaySec = $null
+                try {
+                    if ($recipeJson -and $recipeJson.InstallerPreferences -and $recipeJson.InstallerPreferences.Architecture) { $archForDisplaySec = [string]$recipeJson.InstallerPreferences.Architecture }
+                    elseif ($wg -and $wg.Architecture) { $archForDisplaySec = [string]$wg.Architecture }
+                    elseif ($PreferArchitecture) { $archForDisplaySec = [string]$PreferArchitecture }
+                } catch {}
+                if ($archForDisplaySec -and $archForDisplaySec.Trim()) {
+                    $displayNameSec = "$resolvedNameForDisplay $wingetVersion ($archForDisplaySec)$secSuffix"
+                } else {
+                    $displayNameSec = "$resolvedNameForDisplay $wingetVersion$secSuffix"
+                }
                 if ($cmdSetSec.Parameters.Keys -contains 'DisplayName') {
                     $paramsSec['DisplayName'] = $displayNameSec
                 }
@@ -5487,13 +5541,13 @@ $summary.Add([PSCustomObject]@{ App=("$resolvedName (Required Updates)"); Intune
         # Secondary detection + requirement rule updates (parity with primary; requirement = presence-only)
         if (-not $NoUpdateDetection) {
             try {
-                Update-DetectionScriptIfPossible -AppId $secondaryAppId -AppName $resolvedName -RequiredVersion $wingetVersion -ProductCode $productCode -VersionRootPath $verRoot
+                Update-DetectionScriptIfPossible -AppId $secondaryAppId -AppName $resolvedName -RequiredVersion $wingetVersion -ProductCode $productCode -VersionRootPath $archRoot
             } catch {
                 Write-Log ("Secondary: detection update failed: {0}" -f $_.Exception.Message) 'WARN'
             }
             try {
                 Write-Log "Secondary: requirement script generation started ..." 'INFO'
-                $reqPath = Update-RequirementRuleIfPossible -AppId $secondaryAppId -AppName $resolvedName -VersionRootPath $verRoot
+                $reqPath = Update-RequirementRuleIfPossible -AppId $secondaryAppId -AppName $resolvedName -VersionRootPath $archRoot
                 if ($reqPath) {
                     try {
                         Update-RequirementRuleForApp -AppId $secondaryAppId -RequirementScriptPath $reqPath
@@ -5616,7 +5670,7 @@ $summary.Add([PSCustomObject]@{ App=("$resolvedName (Required Updates)"); Intune
 
         # Detection update by default (unless -NoUpdateDetection)
         if (-not $NoUpdateDetection) {
-            Update-DetectionScriptIfPossible -AppId $intuneAppId -AppName $resolvedName -RequiredVersion $wingetVersion -ProductCode $productCode -VersionRootPath $verRoot
+            Update-DetectionScriptIfPossible -AppId $intuneAppId -AppName $resolvedName -RequiredVersion $wingetVersion -ProductCode $productCode -VersionRootPath $archRoot
         } else {
             Write-Log "NoUpdateDetection set; skipping detection update." 'DEBUG'
         }
