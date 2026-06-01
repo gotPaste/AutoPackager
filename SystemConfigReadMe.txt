@@ -24,19 +24,45 @@ All keys are optional unless marked Required. When a key is missing, the script 
     - "IntuneWinAppUtil.exe" (next to script)
     - "C:\\Tools\\IntuneWinAppUtil.exe"
     - null (let the script auto-resolve)
+- DefaultIconFolder (string)
+  Purpose: Folder containing default app icon files. When a recipe does not specify an icon, the script looks here for a matching file.
+  Default: "Logos"
+  Example: "Logos"
+- RecipeNetworkFolder (string)
+  Purpose: Optional network/UNC path from which recipe JSON files are synced or pulled at runtime. Leave empty to use only the local RecipesRoot.
+  Default: "" (disabled)
+  Example: "\\\\server\\share\\Recipes"
+- TestingRoot (string)
+  Purpose: Root folder for testing artifacts (used during test/dry-run packaging flows).
+  Default: "Testing"
+- LogFilePathAdmin (string)
+  Purpose: Log folder path baked into generated ADT/PSAppDeployToolkit install scripts for the admin (SYSTEM) context. Written into config.psd1 as LogPath.
+  Default: "C:\\ProgramData\\Microsoft\\IntuneManagementExtension\\Logs\\Apps"
+- LogFilePathUser (string)
+  Purpose: Log folder path baked into generated ADT/PSAppDeployToolkit install scripts for the user context. Written into config.psd1 as LogPathNoAdminRights.
+  Default: "C:\\ProgramData\\Logs\\Software"
 
 2) Branding
 - NotificationBrandTitle (string)
-  Purpose: Prefix shown in user notification pop-ups during install (e.g., "OPENLANE IT - AppName").
-  Default: "OPENLANE IT"
+  Purpose: Prefix shown in user notification pop-ups during install. Also written as CompanyName into PSAppDeployToolkit config.psd1.
+  Default: "Your Company"
+  Example: "Contoso IT"
 
 3) Email
+- Provider (string)
+  Purpose: Selects the email send method.
+  Allowed: "smtp" | "graph"
+  Default: "smtp" (if omitted)
+  Notes: When set to "graph", the script uses the Email.Graph object for authentication and ignores Email.Smtp credentials. The sender address is taken from Email.Graph.MailSendMailbox instead of Email.From/Email.Smtp.From.
 - Enabled (bool) [optional]
   Purpose: Master enable switch for summary email sending.
   Default: true (if omitted)
-- To (string[]), From (string)
-  Purpose: Recipient list and sender address for summary email.
-  Required: To and From must be present to send mail.
+- To (string[])
+  Purpose: Recipient list for summary email.
+  Required: Must be present to send mail.
+- From (string)
+  Purpose: Sender address when using the "smtp" provider. For "graph" provider, sender is Email.Graph.MailSendMailbox instead.
+  Required: Must be present when using smtp provider to send mail.
 - SubjectPrefix (string)
   Purpose: Subject prefix for summary emails.
   Default: "Intune AutoPackager"
@@ -55,9 +81,10 @@ All keys are optional unless marked Required. When a key is missing, the script 
     - updatesOrFailures: Send only if at least one app was updated or a failure occurred
     - failuresOnly: Send only if failures occurred
     - never: Do not send email
-- Smtp (object)
+- Smtp (object) [used when Provider = "smtp"]
   - Server (string) [Required to send]
   - Port (int) [Required to send]
+  - From (string) [sender address; can be here or at Email.From]
   - UseSsl (bool) [Required to send]
   - User (string) [Optional; typical for SendGrid is "apikey"]
   - ApiKeyEnv (string) [Optional; e.g., "SENDGRID_API_KEY"]
@@ -70,6 +97,15 @@ All keys are optional unless marked Required. When a key is missing, the script 
     Security note: Storing secrets in JSON is plaintext. Prefer environment variables or a secret store in production. Example for SendGrid:
       User: "apikey"
       Env var: SENDGRID_API_KEY=<your key>
+- Graph (object) [used when Provider = "graph"]
+  Purpose: App registration credentials for sending mail via Microsoft Graph API (client_credentials flow).
+  - TenantId (string) [Required for graph send]
+  - ClientId (string) [Required for graph send]
+  - ClientSecret (string) [Required for graph send; plaintext, converted to SecureString at runtime]
+  - MailSendMailbox (string) [Required for graph send; the shared/licensed mailbox to send from]
+  - Scope (string) [Optional; default: "https://graph.microsoft.com/.default"]
+  - GrantType (string) [Optional; default: "client_credentials"]
+  Security note: Avoid storing ClientSecret in plaintext. Use a secret store or environment injection in production.
 
 4) AzureAuth 
 - Purpose: Provide app-only authentication parameters for Intune Graph connections via config.
@@ -81,13 +117,13 @@ All keys are optional unless marked Required. When a key is missing, the script 
 - Precedence with other sources: CLI parameters > Config.AzureAuth > AZInfo.csv
 - Auth mode: Provide either ClientSecret or CertificateThumbprint. If both are present, ClientSecret is used.
 - Security note: Avoid storing secrets in plaintext when possible. Prefer certificate auth or environment-based secret injection.
-- Icon upload: The GUI’s IntuneAppTools helper only supports large icon upload when authenticated with a ClientSecret (app-only token). When using certificate-only/module session, icon upload is not performed and a warning is printed.
+- Icon upload: The GUI's IntuneAppTools helper only supports large icon upload when authenticated with a ClientSecret (app-only token). When using certificate-only/module session, icon upload is not performed and a warning is printed.
 - Supported icon types for upload: .png, .jpg, .jpeg
 
 5) GitHubToken
-- Purpose: Remove api restriction when querying GitHub repository
+- Purpose: Remove API rate limit restrictions when querying GitHub repositories (e.g., winget-pkgs manifest lookups).
 - Fields:
-  - GitHubToken (string)
+  - GitHubToken (string) — personal access token or fine-grained PAT with read access
 
 6) PackagingDefaults
 - PreferArchitecture (string)
@@ -116,7 +152,11 @@ All keys are optional unless marked Required. When a key is missing, the script 
   Purpose: If true, install/uninstall command lines uploaded to Intune are set to run the generated "install.ps1" and "uninstall.ps1" (preferred). If false, vendor command lines are used instead.
   Default: true
 
-7) IntuneUploadVerify
+7) AllowAvailableUninstall (bool) [top-level]
+- Purpose: When true, enables an uninstall assignment to be created for apps that are deployed as Available (in addition to or instead of Required). When false, uninstall assignments are skipped for Available-intent apps.
+- Default: false
+
+8) IntuneUploadVerify
 Controls the post-upload verification logic (module-based size/committedContentVersion comparison).
 - TimeoutSeconds (int)
   Purpose: Max time to wait for Intune to reflect the new content update.
@@ -134,7 +174,7 @@ Controls the post-upload verification logic (module-based size/committedContentV
   Purpose: Accept difference tolerance between module-reported size and local .intunewin size when verifying.
   Default: 5
 
-8) Notification
+9) Notification
 Defaults used when generating the install.ps1 that runs on endpoints. The popup appears only if:
 - Notification.Defaults.Enabled is true (or recipe overrides enable), AND
 - There are processes to close (from the recipe ForceTaskClose list) that are currently running.
@@ -153,7 +193,7 @@ Defaults used when generating the install.ps1 that runs on endpoints. The popup 
   Purpose: Hours until deferral expires. When expired, popup informs user that installation must occur.
   Default: 24
 
-9) SecondaryRequiredApp
+10) SecondaryRequiredApp
 Settings for a secondary app scenario (e.g., "Required Updates" ring).
 Note: The script also supports an alternate top-level "Secondary" object with matching structure; if both are present, "SecondaryRequiredApp" takes precedence.
 
@@ -183,7 +223,61 @@ Note: The script also supports an alternate top-level "Secondary" object with ma
       - MinuteOfHour (int, 0-59)
     Default: 23:59 local
 
-10) Archive
+11) Primary (object) [optional]
+Settings for primary app assignment defaults. Used to control deadline behavior on the primary (Available/Required) app separate from the secondary ring app.
+- AssignmentDefaults (object)
+  - UpdateDeadlineFromRings (bool)
+    Purpose: When true, the primary app deadline is updated to match the earliest ring deadline computed this run.
+    Default: false
+  - Deadline (object)
+    Purpose: Explicit deadline time for the primary app assignment.
+    Fields:
+      - HourOfDay (int, 0-23)
+      - MinuteOfHour (int, 0-59)
+    Default: 23:59 local
+
+12) RequiredUpdateDefaultGroups
+Default Entra group and filter assignments for each deployment ring when publishing a Required Update secondary app. These are used when the recipe does not specify ring group overrides. Ring delay days control when each ring's deadline is set relative to the publish date.
+
+- PilotGroup (string)
+  Purpose: Entra group ID or display name for the Pilot (Ring 1) ring assignment.
+  Default: "" (no assignment)
+- PilotFilter (string)
+  Purpose: Intune assignment filter ID or display name for Pilot ring.
+  Default: "" (no filter)
+- PilotFilterType (string)
+  Purpose: Filter inclusion mode for Pilot ring.
+  Allowed: "Include" | "Exclude"
+  Default: "Include"
+- PilotDelayDays (int)
+  Purpose: Days after publish date before Pilot ring deadline.
+  Default: 1
+- UATGroup (string)
+  Purpose: Entra group ID or display name for the UAT (Ring 2) ring assignment.
+  Default: ""
+- UATFilter (string)
+  Purpose: Intune assignment filter for UAT ring.
+  Default: ""
+- UATFilterType (string)
+  Allowed: "Include" | "Exclude"
+  Default: "Include"
+- UATDelayDays (int)
+  Purpose: Days after publish date before UAT ring deadline.
+  Default: 5
+- GAGroup (string)
+  Purpose: Entra group ID or display name for the GA (Ring 3) broad deployment ring.
+  Default: ""
+- GAFilter (string)
+  Purpose: Intune assignment filter for GA ring.
+  Default: ""
+- GAFilterType (string)
+  Allowed: "Include" | "Exclude"
+  Default: "Include"
+- GADelayDays (int)
+  Purpose: Days after publish date before GA ring deadline.
+  Default: 9
+
+13) Archive
 Controls end-of-run archival and retention.
 - Enabled (bool)
   Purpose: Enable archive-to-network step. When disabled, archival is skipped.
@@ -198,11 +292,14 @@ Controls end-of-run archival and retention.
   Purpose: At the archive root, keep only N newest version folders per app touched this run (older versions are removed).
   Default: 3
 
-11) Cleanup
+14) Cleanup
 - PurgeWorkingOnStart (bool)
   Purpose: On start, delete all subfolders inside WorkingRoot to ensure a clean environment (root is kept so logs/CSV can be written).
   Default: true
   Caution: This removes old working folders before the run begins; ensure important artifacts are archived externally.
+- PurgeTestingOnStart (bool)
+  Purpose: On start, delete all subfolders inside TestingRoot. Mirrors PurgeWorkingOnStart behavior for the testing folder.
+  Default: false
 
 Additional Input Sources (outside JSON)
 - AZInfo.csv (optional file next to the script)
@@ -232,14 +329,20 @@ Behavior Notes
   - UpdateDetection true triggers generation and update of a multi-source detection script. For MSI, ProductCode is read from the MSI file where possible.
 - Verification:
   - Module-based size/version verification attempts to ensure Intune reflects the new content; tolerance is configurable; strict mode can fail the run if not converged.
+- Email Provider:
+  - When Provider="graph", the script acquires an OAuth token via client_credentials and sends via Graph API (no SMTP relay needed). Requires Email.Graph credentials and a licensed mailbox.
+  - When Provider="smtp" (or omitted), the script uses System.Net.Mail with the Smtp object settings.
 
 Quick Defaults Summary (if omitted):
-- Paths: WorkingRoot="Working", LogPath="AutoPackager.log", RecipesRoot="Recipes"
-- Branding.NotificationBrandTitle="OPENLANE IT"
-- Email: Enabled=true; SendPolicy="updatesOrFailures"; AttachCsv=false; AttachLog=true; Smtp required to send
+- Paths: WorkingRoot="Working", LogPath="AutoPackager.log", RecipesRoot="Recipes", DefaultIconFolder="Logos", TestingRoot="Testing"
+- Paths (ADT scripts): LogFilePathAdmin="C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\Apps", LogFilePathUser="C:\ProgramData\Logs\Software"
+- Branding.NotificationBrandTitle="Your Company"
+- AllowAvailableUninstall=false
+- Email: Enabled=true; Provider="smtp"; SendPolicy="updatesOrFailures"; AttachCsv=false; AttachLog=true; Smtp required to send
 - PackagingDefaults: PreferArchitecture="x64"; DefaultScope="machine"; WingetSource="winget"; RunMode="PackageOnly"; AllRecipes=false; UpdateDetection=true; UseScriptCommandLines=true
 - IntuneUploadVerify: TimeoutSeconds=600; IntervalSeconds=10; SkipVerify=false; StrictVerify=false; SizeTolerancePercent=5
 - Notification.Defaults: Enabled=false; TimerMinutes=2; DeferralEnabled=false; DeferralHoursAllowed=24
 - SecondaryRequiredApp: DisplayNameSuffix=" - Required Update"; ClearExistingBeforeAssign=true; Deadline=23:59 local
+- RequiredUpdateDefaultGroups: PilotDelayDays=1; UATDelayDays=5; GADelayDays=9; FilterType defaults="Include"
 - Archive: Enabled=true; RetentionDays=14; KeepVersionsPerApp=3
-- Cleanup.PurgeWorkingOnStart=true
+- Cleanup: PurgeWorkingOnStart=true; PurgeTestingOnStart=false
