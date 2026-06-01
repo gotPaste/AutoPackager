@@ -1,0 +1,31 @@
+﻿@{
+    Assets = @{
+        # Specify filename of the banner (Classic-only).
+        Banner = '..\Assets\Banner.Classic.png'
+
+        # Specify filename of the logo.
+        Logo = '..\Assets\AppIcon.png'
+
+        # Specify filename of the logo (for dark mode).
+        LogoDark = '..\Assets\AppIconDark.png'
+    }
+
+    MSI = @{
+        # Log path used for MSI logging. Uses the same path as Toolkit when null or empty.
+        LogPath = '$envProgramData\Microsoft\IntuneManagementExtension\Logs'
+
+        # Log path used for MSI logging when RequireAdmin is False. Uses the same path as Toolkit when null or empty.
+        LogPathNoAdminRights = '$envProgramData\Microsoft\IntuneManagementExtension\Logs'
+    }
+
+    Toolkit = @{
+        # The name to show by default for dialog subtitles, balloon notifications, etc.
+        CompanyName = 'CNO Financial Group'
+
+        # Log path used for Toolkit logging.
+        LogPath = '$envProgramData\Microsoft\IntuneManagementExtension\Logs'
+
+        # Same as LogPath but used when RequireAdmin is False.
+        LogPathNoAdminRights = '$envProgramData\Microsoft\IntuneManagementExtension\Logs'
+    }
+}
