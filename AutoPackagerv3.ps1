@@ -4950,7 +4950,6 @@ if ($cmp -le 0) {
                         } catch {}
 
                         $adtReplacements = @{
-                            'AppVendor'       = $adtVendor
                             'AppName'         = $adtName
                             'AppVersion'      = $adtVersion
                             'AppArch'         = $adtArch
@@ -5320,7 +5319,6 @@ if ($cmp -le 0) {
             } catch {}
 
             $adtReplacements = @{
-                'AppVendor'       = $adtVendor
                 'AppName'         = $adtName
                 'AppVersion'      = $adtVersion
                 'AppArch'         = $adtArch
