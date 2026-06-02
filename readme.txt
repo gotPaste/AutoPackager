@@ -5,7 +5,7 @@ This project streamlines packaging and updating Win32 apps in Microsoft Intune u
 
 Two ways to use:
 1) Windows Forms GUI (recommended): Start-AutoPackagerGUI.ps1
-2) Command line: AutoPackagerv2.ps1 with flags
+2) Command line: AutoPackagerv3.ps1 with flags
 
 This README provides a GUI quick start, CLI quick start, and a reference background process. The GUI Help tab loads this file.
 

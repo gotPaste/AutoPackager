@@ -12,7 +12,7 @@ if (-not $ScriptRoot -or [string]::IsNullOrWhiteSpace($ScriptRoot)) {
 }
 
 # Paths to scripts and files
-$PathAutoPackager      = Join-Path $ScriptRoot 'AutoPackagerv2.ps1'
+$PathAutoPackager      = Join-Path $ScriptRoot 'AutoPackagerv3.ps1'
 $PathNewRecipe         = Join-Path $ScriptRoot 'New-RecipeFromWinget.ps1'
 $PathResetPrimary      = Join-Path $ScriptRoot 'IntuneApplicationResetAll.ps1'
 $PathResetSecondary    = Join-Path $ScriptRoot 'IntuneApplicationResetAll.ps1'
@@ -510,7 +510,7 @@ function Parse-WingetShowText {
   }
 }
 
-# GitHub manifest resolver (winget-pkgs) - adapted from AutoPackagerv2.ps1
+# GitHub manifest resolver (winget-pkgs) - adapted from AutoPackagerv3.ps1
 function Get-WingetManifestInfoFromGitHub {
   param(
     [Parameter(Mandatory=$true)][string]$WingetId,
@@ -2803,7 +2803,7 @@ function Build-RunCommand() {
 
 $btnRun.Add_Click({
   if (-not (Test-Path -LiteralPath $PathAutoPackager)) {
-    [System.Windows.Forms.MessageBox]::Show("AutoPackagerv2.ps1 not found:`r`n$PathAutoPackager","Missing",0,[System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null; return
+    [System.Windows.Forms.MessageBox]::Show("AutoPackagerv3.ps1 not found:`r`n$PathAutoPackager","Missing",0,[System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null; return
   }
   $p = $tbRunPath.Text.Trim()
   if (-not $p) {
@@ -3087,7 +3087,7 @@ $btnPrereq.Add_Click({
   $PathSysReadme = Join-Path $ScriptRoot 'SystemConfigReadMe.txt'
   $PathIntuneWinFile = Join-Path $ScriptRoot 'Temp\install.intunewin'
   $files = @(
-    @{ Name='AutoPackagerv2.ps1'; Path=$PathAutoPackager },
+    @{ Name='AutoPackagerv3.ps1'; Path=$PathAutoPackager },
     @{ Name='New-RecipeFromWinget.ps1'; Path=$PathNewRecipe },
     @{ Name='IntuneAppTools.ps1'; Path=$PathIntuneTools },
     @{ Name='AutoPackager.config.json'; Path=$PathConfig },

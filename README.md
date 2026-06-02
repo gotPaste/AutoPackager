@@ -7,7 +7,7 @@ This project streamlines packaging and updating Win32 apps in Microsoft Intune u
 
 ## Two ways to use:
 - Windows Forms GUI (recommended): `Start-AutoPackagerGUI.ps1`
-- Command line: `AutoPackagerv2.ps1` with flags
+- Command line: `AutoPackagerv3.ps1` with flags
 
 This README provides a GUI quick start, CLI quick start, and a reference background process. The GUI Help tab loads this content.
 
@@ -200,7 +200,7 @@ Wherever you setup the Scheduled task share the Recipe Folder in the Script loca
   - Actions Tab
     - Action: Start a program
     - Program/Script: c:\windows\system32\WindowsPowerShell\v1.0\powershell.exe
-    - Add arguments (optional): -NoProfile -executionpolicy bypass -file ".\autopackagerv2.ps1" -fullrun -allrecipes
+    - Add arguments (optional): -NoProfile -executionpolicy bypass -file ".\autopackagerv3.ps1" -fullrun -allrecipes
     - Start in (optional): <PathToScript> (example: D:\AutoPackager)  
 ---
 
