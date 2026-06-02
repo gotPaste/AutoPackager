@@ -378,6 +378,17 @@ function Write-Log {
 }
 function Stop-WithError([string]$msg){ Write-Log $msg 'ERROR'; throw $msg }
 
+# ========== Phase Timing ==========
+function Start-Phase([string]$Name) {
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    Write-Log ("==> Phase START: {0}" -f $Name) 'INFO'
+    return [pscustomobject]@{ Name = $Name; Stopwatch = $sw }
+}
+function Stop-Phase([object]$Phase) {
+    $Phase.Stopwatch.Stop()
+    Write-Log ("==> Phase END:   {0} [{1:N1}s]" -f $Phase.Name, $Phase.Stopwatch.Elapsed.TotalSeconds) 'INFO'
+}
+
 # ========== Utility ==========
 function ConvertTo-PlainText {
     param([securestring]$Secure)
@@ -2548,6 +2559,8 @@ function Update-RequirementRuleForApp {
     }
 }
 
+#TOBEDELETED - BEGIN (Generate-InstallScript / install.ps1 generation)
+<#
 # ========== Dynamic Install Script Generation ==========
 function Generate-InstallScript {
     param(
@@ -2994,6 +3007,11 @@ if(`$null -eq `$code){ `$code = 0 }
         throw
     }
 }
+#>
+#TOBEDELETED - END (Generate-InstallScript / install.ps1 generation)
+
+#TOBEDELETED - BEGIN (first Generate-UninstallScript / uninstall.ps1 generation)
+<#
 # ========== Dynamic Uninstall Script Generation ==========
 function Generate-UninstallScript {
     param(
@@ -3387,6 +3405,9 @@ try{
         throw
     }
 }
+#>
+#TOBEDELETED - END (first Generate-UninstallScript / uninstall.ps1 generation)
+
 # ========== Version Comparison ==========
 function Compare-VersionStrings {
     param([string]$A,[string]$B)
@@ -3851,6 +3872,8 @@ function Build-RingSummary {
     return ($parts -join "; ")
 }
 
+#TOBEDELETED - BEGIN (second Generate-UninstallScript simplified / uninstall.ps1 generation)
+<#
 # ========== Simplified Uninstall Script Generator (overrides previous definition) ==========
 function Generate-UninstallScript {
     param(
@@ -4105,6 +4128,8 @@ try{
         throw
     }
 }
+#>
+#TOBEDELETED - END (second Generate-UninstallScript simplified / uninstall.ps1 generation)
 
 # ========== Primary Assignment Deadline Update Helper ==========
 function Update-PrimaryRequiredAssignmentDeadlineFromRecipe {
@@ -4622,12 +4647,14 @@ try {
     if (-not $appName) { $appName = $wingetId }
 
     # Winget lookup via GitHub manifest (replaces 'winget show' text parsing)
+    $ph = Start-Phase 'GitHubManifestLookup'
     $wg = Get-WingetManifestInfoFromGitHub `
         -WingetId $wingetId `
         -PreferArchitecture ($(if ($archPref) { $archPref } else { $PreferArchitecture })) `
         -PreferScope ($(if ($scopePref) { $scopePref } else { $DefaultScope })) `
         -DesiredLocale ($(if ($recipeJson.InstallerPreferences.Locale) { $recipeJson.InstallerPreferences.Locale } else { 'en-US' })) `
         -DesiredInstallerType ($(if ($recipeJson.InstallerPreferences.InstallerType) { $recipeJson.InstallerPreferences.InstallerType } else { $null }))
+    Stop-Phase $ph
     if (-not $wg) { Stop-WithError ("Failed to resolve winget manifest for {0} via GitHub" -f $wingetId) }
     $wingetVersion = $wg.Version
     $installerUrl  = $wg.InstallerUrl
@@ -4800,6 +4827,407 @@ if ($cmp -le 0) {
     if (-not $archChoice -or [string]::IsNullOrWhiteSpace($archChoice)) { $archChoice = 'x64' }
     $archRoot = Ensure-Dir (Join-Path $verRoot $archChoice)
     $downloadDir = Ensure-Dir (Join-Path $archRoot 'Download')
+
+    # Copy PSAppDeployToolkitv4 to the working directory as 'Build' (FullRun and PackageOnly)
+    if ($true) {
+        $psadtSource = Join-Path (Join-Path $script:ScriptRootEffective 'Temp') 'PSAppDeployToolkitv4'
+        $psadtDest   = Join-Path $archRoot 'Build'
+        if (Test-Path -LiteralPath $psadtSource) {
+            Write-Log ("Copying PSAppDeployToolkitv4 to Build directory: {0}" -f $psadtDest) 'INFO'
+            try {
+                if (Test-Path -LiteralPath $psadtDest) {
+                    Remove-Item -LiteralPath $psadtDest -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                $phCopy = Start-Phase 'PSADTCopy'
+                Copy-Item -LiteralPath $psadtSource -Destination $psadtDest -Recurse -Force -ErrorAction Stop
+                Stop-Phase $phCopy
+                Write-Log "PSAppDeployToolkitv4 copied successfully as 'Build'." 'INFO'
+
+                # Invoke-AppDeployToolkit.ps1 variable update is deferred until after $installerName is set (see below)
+                $script:InvokeAdtPathDeferred = Join-Path $psadtDest 'Invoke-AppDeployToolkit.ps1'
+
+                # Update config.psd1 from AutoPackager.config.json settings
+                $psadtConfigPsd1Path = Join-Path $psadtDest 'Config\config.psd1'
+                if (Test-Path -LiteralPath $psadtConfigPsd1Path) {
+                    try {
+                        $adtCompanyName  = 'PSAppDeployToolkit'
+                        $adtLogPathAdmin = 'C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\Apps'
+                        $adtLogPathUser  = 'C:\ProgramData\Logs\Software'
+                        try {
+                            if ($script:Config -and $script:Config.Branding -and $script:Config.Branding.NotificationBrandTitle) {
+                                $adtCompanyName = [string]$script:Config.Branding.NotificationBrandTitle
+                            }
+                            if ($script:Config -and $script:Config.Paths -and $script:Config.Paths.LogFilePathAdmin) {
+                                $adtLogPathAdmin = [string]$script:Config.Paths.LogFilePathAdmin
+                            }
+                            if ($script:Config -and $script:Config.Paths -and $script:Config.Paths.LogFilePathUser) {
+                                $adtLogPathUser = [string]$script:Config.Paths.LogFilePathUser
+                            }
+                        } catch {}
+                        $psd1Lines = @(Get-Content -LiteralPath $psadtConfigPsd1Path -Encoding UTF8)
+                        if ($psd1Lines -and $psd1Lines.Count -gt 0) {
+                            $psd1Tmp = @($psd1Lines | ForEach-Object {
+                                $_ -replace "(?i)^(\s*CompanyName\s*=\s*')[^']*('.*)",         "`${1}$($adtCompanyName.Replace("'","''"))`${2}" `
+                                   -replace "(?i)^(\s*LogPath\s*=\s*).*$",                     "`${1}'$($adtLogPathAdmin.Replace("'","''"))'" `
+                                   -replace "(?i)^(\s*LogPathNoAdminRights\s*=\s*).*$",        "`${1}'$($adtLogPathUser.Replace("'","''"))'" `
+                                   -replace "(?i)^(\s*LogToSubfolder\s*=\s*).*$",              "`${1}`$true"
+                            })
+                            if ($psd1Tmp -and $psd1Tmp.Count -gt 0) { $psd1Lines = $psd1Tmp }
+                            if ($psd1Lines -and @($psd1Lines).Count -gt 0) {
+                                Set-Content -LiteralPath $psadtConfigPsd1Path -Value $psd1Lines -Encoding UTF8
+                                Write-Log ("config.psd1 updated: CompanyName='{0}', LogPath='{1}', LogPathNoAdminRights='{2}'" -f $adtCompanyName, $adtLogPathAdmin, $adtLogPathUser) 'INFO'
+                            } else {
+                                Write-Log ("config.psd1 psd1Lines empty before write; skipping to protect file." ) 'WARN'
+                            }
+                        } else {
+                            Write-Log ("config.psd1 read returned empty; skipping write to avoid blanking '{0}'" -f $psadtConfigPsd1Path) 'WARN'
+                        }
+                    } catch {
+                        Write-Log ("Failed to update config.psd1: {0}" -f $_.Exception.Message) 'WARN'
+                    }
+                } else {
+                    Write-Log ("config.psd1 not found at: {0}; skipping update." -f $psadtConfigPsd1Path) 'WARN'
+                }
+
+                if ($false) {
+                    try {
+                        # Derive AppLang from recipe locale (e.g. en-US -> EN)
+                        $recipeLocaleRaw = if ($recipeJson.InstallerPreferences.Locale) { $recipeJson.InstallerPreferences.Locale } else { 'en-US' }
+                        $appLangValue = ($recipeLocaleRaw -split '-')[0].ToUpper()
+
+                        # Pre-sanitize values (escape single quotes for PS string literals)
+                        $adtVendor  = if ($publisher)     { $publisher.Replace("'", "''")     } else { '' }
+                        $adtName    = if ($resolvedName)  { $resolvedName.Replace("'", "''")  } else { '' }
+                        $adtVersion = if ($wingetVersion) { $wingetVersion.Replace("'", "''") } else { '' }
+                        $adtArch    = if ($archChoice)    { $archChoice.Replace("'", "''")    } else { '' }
+
+                        # Compute RequireAdmin from recipe InstallerPreferences.Scope
+                        $requireAdminValue = if ($scopePref -and $scopePref.Trim().ToLower() -eq 'user') { '$false' } else { '$true' }
+
+                        # Compute ForceCloseProcessesCountdown from recipe NotificationTimerInMinutes * 60
+                        $adtForceCountdown = 120
+                        try {
+                            $np = $recipeJson.NotificationPopup
+                            if ($np -and $np.PSObject.Properties.Name -contains 'NotificationTimerInMinutes') {
+                                $adtMins = [int]$np.NotificationTimerInMinutes
+                                if ($adtMins -gt 0) { $adtForceCountdown = $adtMins * 60 }
+                            }
+                        } catch {}
+
+                        # Compute DeferDeadline from today + max DeadlineDelayDays across all rings
+                        # If no valid DeadlineDelayDays found (null/missing), use -1 so deadline is already in the past
+                        $adtMaxDelay = $null
+                        try {
+                            $adtRings = $recipeJson.Rings
+                            if ($adtRings) {
+                                foreach ($rk in $adtRings.PSObject.Properties.Name) {
+                                    try {
+                                        $d = [int]$adtRings.$rk.DeadlineDelayDays
+                                        if ($null -eq $adtMaxDelay -or $d -gt $adtMaxDelay) { $adtMaxDelay = $d }
+                                    } catch {}
+                                }
+                            }
+                        } catch {}
+                        if ($null -eq $adtMaxDelay) { $adtMaxDelay = -1 }
+                        $adtDeferDeadline = (Get-Date).AddDays($adtMaxDelay).ToString('MM-dd-yyyy')
+
+                        # Compute AppProcessesToClose array literal from recipe ForceTaskClose
+                        $adtProcList = "@()"
+                        try {
+                            $adtForceSpec = $forceTaskCloseSpec
+                            $adtProcs = @()
+                            if ($adtForceSpec) {
+                                if ($adtForceSpec -is [System.Collections.IEnumerable] -and -not ($adtForceSpec -is [string])) {
+                                    foreach ($x in $adtForceSpec) { if ($null -ne $x) { $adtProcs += $x.ToString().Trim() } }
+                                } else {
+                                    foreach ($p in ($adtForceSpec.ToString() -split "[`r`n,;]")) { $t = $p.Trim(); if ($t) { $adtProcs += $t } }
+                                }
+                                $adtProcs = $adtProcs | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+                                if ($adtProcs.Count -gt 0) {
+                                    $adtProcList = "@(" + (($adtProcs | ForEach-Object { "'" + ($_ -replace "'","''") + "'" }) -join ",") + ")"
+                                }
+                            }
+                        } catch {}
+
+                        $adtReplacements = @{
+                            'AppVendor'       = $adtVendor
+                            'AppName'         = $adtName
+                            'AppVersion'      = $adtVersion
+                            'AppArch'         = $adtArch
+                            'AppLang'         = $appLangValue
+                            'AppScriptAuthor' = 'AutoPackager'
+                            'DeferDeadline'   = $adtDeferDeadline
+                        }
+                        $phInvoke = Start-Phase 'InvokeADTUpdate'
+                        $invokeLines = Get-Content -LiteralPath $invokeAdtPath -Encoding UTF8
+                        if ($invokeLines -and $invokeLines.Count -gt 0) {
+                            $invokeLines = $invokeLines | ForEach-Object {
+                                $l = $_
+                                foreach ($k in $adtReplacements.Keys) {
+                                    if ($l -match "(?i)^\s*$k\s*=\s*'") {
+                                        # Replace the single-quoted value literally (no regex substitution)
+                                        $start = $l.IndexOf("'")
+                                        $end   = $l.LastIndexOf("'")
+                                        if ($start -ge 0 -and $end -gt $start) {
+                                            $l = $l.Substring(0, $start + 1) + $adtReplacements[$k] + $l.Substring($end)
+                                        }
+                                        break
+                                    }
+                                }
+                                $l
+                            }
+                            # Fix ForceCloseProcessesCountdown (integer, no quotes) and AppProcessesToClose (array literal)
+                            $invokeLines = $invokeLines | ForEach-Object {
+                                $_ -replace '(?i)^(\s*ForceCloseProcessesCountdown\s*=\s*).*$', "`${1}$adtForceCountdown" `
+                                   -replace '(?i)^(\s*AppProcessesToClose\s*=\s*)@\(\)(.*)$', "`${1}$adtProcList`${2}" `
+                                   -replace '(?i)^(\s*RequireAdmin\s*=\s*).*$',                "`${1}$requireAdminValue"
+                            }
+                            # Inject Uninstall-ADTApplication under Pre-Installation anchor if ForceUninstall is set
+                            # Build $adtUninstallLine unconditionally (used by Uninstall/Repair injections always)
+                            $adtInstallerType = ''
+                            try { $adtInstallerType = [string]$recipeJson.InstallerPreferences.InstallerType } catch {}
+                            if ($adtVendor) {
+                                $adtUninstallLine = "    Uninstall-ADTApplication -Name '$adtName' -ApplicationType '$adtInstallerType' -FilterScript { `$_.Publisher -match '$adtVendor' }"
+                            } else {
+                                $adtUninstallLine = "    Uninstall-ADTApplication -Name '$adtName' -ApplicationType '$adtInstallerType'"
+                            }
+                            # Append -ArgumentList if recipe provides UninstallArgs
+                            $adtUninstallArgsRaw = ''
+                            try { if ($uninstallArgsFromRecipe -and $uninstallArgsFromRecipe.Trim()) { $adtUninstallArgsRaw = $uninstallArgsFromRecipe.Trim() } } catch {}
+                            if ($adtUninstallArgsRaw) {
+                                $adtUninstallLine += " -ArgumentList '$($adtUninstallArgsRaw.Replace("'","''"))'"
+                            }
+
+                            # Inject into Install-ADTDeployment Pre-Installation anchor ONLY when ForceUninstall=true
+                            if ($recipeJson.ForceUninstall -eq $true) {
+                                # Check if Uninstall-ADTApplication already exists inside Install-ADTDeployment only
+                                $adtInInstallFn = $false; $adtAlreadyInjected = $false
+                                foreach ($adtL in $invokeLines) {
+                                    if ($adtL -match '^function Install-ADTDeployment') { $adtInInstallFn = $true; continue }
+                                    if ($adtInInstallFn -and $adtL -match '^function ') { break }
+                                    if ($adtInInstallFn -and $adtL -match 'Uninstall-ADTApplication') { $adtAlreadyInjected = $true; break }
+                                }
+                                if (-not $adtAlreadyInjected) {
+                                    $adtAnchorPattern = '##\s*<Perform Pre-Installation tasks here>'
+                                    $adtNewLines = [System.Collections.Generic.List[string]]::new()
+                                    foreach ($adtL in $invokeLines) {
+                                        $adtNewLines.Add($adtL)
+                                        if ($adtL -match $adtAnchorPattern) {
+                                            $adtNewLines.Add($adtUninstallLine)
+                                        }
+                                    }
+                                    $invokeLines = $adtNewLines.ToArray()
+                                    Write-Log "Injected Uninstall-ADTApplication line into Install-ADTDeployment (ForceUninstall=true)." 'INFO'
+                                }
+                            }
+
+                            # Always inject Uninstall-ADTApplication into Uninstall-ADTDeployment at Post-Uninstallation anchor
+                            $adtUninstallLinePost = $adtUninstallLine  # reuse same constructed line
+                            $adtPostAnchor = '##\s*<Perform Uninstallation tasks here>'
+                            $adtInUninstallFn = $false; $adtAlreadyInjectedPost = $false
+                            foreach ($adtL in $invokeLines) {
+                                if ($adtL -match '^function Uninstall-ADTDeployment') { $adtInUninstallFn = $true; continue }
+                                if ($adtInUninstallFn -and $adtL -match '^function ') { break }
+                                if ($adtInUninstallFn -and $adtL -match 'Uninstall-ADTApplication') { $adtAlreadyInjectedPost = $true; break }
+                            }
+                            if (-not $adtAlreadyInjectedPost) {
+                                $adtNewLinesPost = [System.Collections.Generic.List[string]]::new()
+                                $adtInUninstallFnPost = $false
+                                foreach ($adtL in $invokeLines) {
+                                    if ($adtL -match '^function Uninstall-ADTDeployment') { $adtInUninstallFnPost = $true }
+                                    if ($adtInUninstallFnPost -and $adtL -match '^function ' -and $adtL -notmatch '^function Uninstall-ADTDeployment') { $adtInUninstallFnPost = $false }
+                                    $adtNewLinesPost.Add($adtL)
+                                    if ($adtInUninstallFnPost -and $adtL -match $adtPostAnchor) {
+                                        $adtNewLinesPost.Add($adtUninstallLinePost)
+                                    }
+                                }
+                                $invokeLines = $adtNewLinesPost.ToArray()
+                                Write-Log "Injected Uninstall-ADTApplication line into Uninstall-ADTDeployment (always)." 'INFO'
+                            } else {
+                                Write-Log "Uninstall-ADTApplication already present in Uninstall-ADTDeployment; skipping injection." 'DEBUG'
+                            }
+
+                            # Always inject Uninstall-ADTApplication into Repair-ADTDeployment at Repair tasks anchor
+                            $adtRepairAnchor = '##\s*<Perform Repair tasks here>'
+                            $adtInRepairFn = $false; $adtAlreadyInjectedRepair = $false
+                            foreach ($adtL in $invokeLines) {
+                                if ($adtL -match '^function Repair-ADTDeployment') { $adtInRepairFn = $true; continue }
+                                if ($adtInRepairFn -and $adtL -match '^function ') { break }
+                                if ($adtInRepairFn -and $adtL -match 'Uninstall-ADTApplication') { $adtAlreadyInjectedRepair = $true; break }
+                            }
+                            if (-not $adtAlreadyInjectedRepair) {
+                                $adtNewLinesRepair = [System.Collections.Generic.List[string]]::new()
+                                $adtInRepairFnPost = $false
+                                foreach ($adtL in $invokeLines) {
+                                    if ($adtL -match '^function Repair-ADTDeployment') { $adtInRepairFnPost = $true }
+                                    if ($adtInRepairFnPost -and $adtL -match '^function ' -and $adtL -notmatch '^function Repair-ADTDeployment') { $adtInRepairFnPost = $false }
+                                    $adtNewLinesRepair.Add($adtL)
+                                    if ($adtInRepairFnPost -and $adtL -match $adtRepairAnchor) {
+                                        $adtNewLinesRepair.Add($adtUninstallLine)
+                                    }
+                                }
+                                $invokeLines = $adtNewLinesRepair.ToArray()
+                                Write-Log "Injected Uninstall-ADTApplication line into Repair-ADTDeployment (always)." 'INFO'
+                            } else {
+                                Write-Log "Uninstall-ADTApplication already present in Repair-ADTDeployment; skipping injection." 'DEBUG'
+                            }
+
+                            # Inject install command into Install-ADTDeployment at Installation tasks anchor (msi/exe only)
+                            $adtInstallAnchor = '##\s*<Perform Installation tasks here>'
+                            $adtInstallLine = $null
+                            $adtInstallerTypeLower = ''
+                            try { $adtInstallerTypeLower = ([string]$installerType).ToLower().Trim() } catch {}
+                            # Also fallback to filename extension if InstallerType is not set
+                            if (-not $adtInstallerTypeLower -and $installerName -match '\.msi$') { $adtInstallerTypeLower = 'msi' }
+                            if (-not $adtInstallerTypeLower -and $installerName -match '\.exe$') { $adtInstallerTypeLower = 'exe' }
+
+                            $adtInstallArgsEscaped = ''
+                            try { if ($installArgsFromRecipe) { $adtInstallArgsEscaped = $installArgsFromRecipe.Trim().Replace("'","''") } } catch {}
+
+                            if ($adtInstallerTypeLower -eq 'msi') {
+                                $adtInstallLine = "    Start-ADTMsiProcess -Action Install -FilePath `"`$dirFiles\$($installerName.Replace("'","''"))`" -ArgumentList '$adtInstallArgsEscaped'"
+                            } elseif ($adtInstallerTypeLower -eq 'exe') {
+                                $adtInstallLine = "    Start-ADTProcess -FilePath `"`$dirFiles\$($installerName.Replace("'","''"))`" -ArgumentList '$adtInstallArgsEscaped' -WindowStyle Hidden -WaitForChildProcesses"
+                            } else {
+                                Write-Log ("InvokeADTUpdate: InstallerType='{0}' is not 'msi' or 'exe'; skipping install command injection." -f $adtInstallerTypeLower) 'WARN'
+                            }
+
+                            if ($adtInstallLine) {
+                                # Idempotency: scan Install-ADTDeployment body for existing install commands
+                                $adtInInstallFnInst = $false; $adtAlreadyInjectedInst = $false
+                                foreach ($adtL in $invokeLines) {
+                                    if ($adtL -match '^function Install-ADTDeployment') { $adtInInstallFnInst = $true; continue }
+                                    if ($adtInInstallFnInst -and $adtL -match '^function ') { break }
+                                    if ($adtInInstallFnInst -and ($adtL -match 'Install-ADTMsiPackage' -or $adtL -match 'Start-ADTProcess')) { $adtAlreadyInjectedInst = $true; break }
+                                }
+                                if (-not $adtAlreadyInjectedInst) {
+                                    $adtNewLinesInst = [System.Collections.Generic.List[string]]::new()
+                                    $adtInInstallFnInst2 = $false
+                                    foreach ($adtL in $invokeLines) {
+                                        if ($adtL -match '^function Install-ADTDeployment') { $adtInInstallFnInst2 = $true }
+                                        if ($adtInInstallFnInst2 -and $adtL -match '^function ' -and $adtL -notmatch '^function Install-ADTDeployment') { $adtInInstallFnInst2 = $false }
+                                        $adtNewLinesInst.Add($adtL)
+                                        if ($adtInInstallFnInst2 -and $adtL -match $adtInstallAnchor) {
+                                            $adtNewLinesInst.Add($adtInstallLine)
+                                        }
+                                    }
+                                    $invokeLines = $adtNewLinesInst.ToArray()
+                                    Write-Log ("Injected install command into Install-ADTDeployment (type={0})." -f $adtInstallerTypeLower) 'INFO'
+                                } else {
+                                    Write-Log "Install command already present in Install-ADTDeployment; skipping injection." 'DEBUG'
+                                }
+                            }
+
+                            # Comment out any active Show-ADTInstallationPrompt lines
+                            $invokeLinesTmp = @($invokeLines | ForEach-Object {
+                                if ($_ -match '^\s*Show-ADTInstallationPrompt') { "# $_" } else { $_ }
+                            })
+                            if ($invokeLinesTmp -and $invokeLinesTmp.Count -gt 0) { $invokeLines = $invokeLinesTmp }
+                            Set-Content -LiteralPath $invokeAdtPath -Value $invokeLines -Encoding UTF8
+                        } else {
+                            Write-Log ("InvokeADTUpdate: file read returned empty; skipping write to avoid blanking '{0}'" -f $invokeAdtPath) 'WARN'
+                        }
+                        Stop-Phase $phInvoke
+                        Write-Log "Invoke-AppDeployToolkit.ps1 variables updated (AppVendor, AppName, AppVersion, AppArch, AppLang, AppScriptAuthor, DeferDeadline, ForceCloseProcessesCountdown, AppProcessesToClose)." 'INFO'
+                    } catch {
+                        Write-Log ("Failed to update Invoke-AppDeployToolkit.ps1 variables: {0}" -f $_.Exception.Message) 'WARN'
+                    }
+
+                # Update config.psd1 CompanyName from AutoPackager.config.json Branding.NotificationBrandTitle
+                $psadtConfigPsd1Path = Join-Path $psadtDest 'Config\config.psd1'
+                if (Test-Path -LiteralPath $psadtConfigPsd1Path) {
+                    try {
+                        $adtCompanyName  = 'PSAppDeployToolkit'
+                        $adtLogPathAdmin = 'C:\ProgramData\Microsoft\IntuneManagementExtension\Logs\Apps'
+                        $adtLogPathUser  = 'C:\ProgramData\Logs\Software'
+                        try {
+                            if ($script:Config -and $script:Config.Branding -and $script:Config.Branding.NotificationBrandTitle) {
+                                $adtCompanyName = [string]$script:Config.Branding.NotificationBrandTitle
+                            }
+                            if ($script:Config -and $script:Config.Paths -and $script:Config.Paths.LogFilePathAdmin) {
+                                $adtLogPathAdmin = [string]$script:Config.Paths.LogFilePathAdmin
+                            }
+                            if ($script:Config -and $script:Config.Paths -and $script:Config.Paths.LogFilePathUser) {
+                                $adtLogPathUser = [string]$script:Config.Paths.LogFilePathUser
+                            }
+                        } catch {}
+                        $psd1Lines = @(Get-Content -LiteralPath $psadtConfigPsd1Path -Encoding UTF8)
+                        if ($psd1Lines -and $psd1Lines.Count -gt 0) {
+                            $psd1Tmp2 = @($psd1Lines | ForEach-Object {
+                                $_ -replace "(?i)^(\s*CompanyName\s*=\s*')[^']*('.*)",          "`${1}$($adtCompanyName.Replace("'","''"))`${2}" `
+                                   -replace "(?i)^(\s*LogPath\s*=\s*).*$",                       "`${1}'$($adtLogPathAdmin.Replace("'","''"))'" `
+                                   -replace "(?i)^(\s*LogPathNoAdminRights\s*=\s*).*$",          "`${1}'$($adtLogPathUser.Replace("'","''"))'" `
+                                   -replace "(?i)^(\s*LogToSubfolder\s*=\s*).*$",               "`${1}`$true"
+                            })
+                            if ($psd1Tmp2 -and $psd1Tmp2.Count -gt 0) { $psd1Lines = $psd1Tmp2 }
+                            if ($psd1Lines -and @($psd1Lines).Count -gt 0) {
+                                Set-Content -LiteralPath $psadtConfigPsd1Path -Value $psd1Lines -Encoding UTF8
+                                Write-Log ("config.psd1 CompanyName updated to: '{0}'" -f $adtCompanyName) 'INFO'
+                            } else {
+                                Write-Log ("config.psd1 psd1Lines empty before write; skipping to protect file.") 'WARN'
+                            }
+                        } else {
+                            Write-Log ("config.psd1 read returned empty; skipping write to avoid blanking '{0}'" -f $psadtConfigPsd1Path) 'WARN'
+                        }
+                    } catch {
+                        Write-Log ("Failed to update config.psd1 CompanyName: {0}" -f $_.Exception.Message) 'WARN'
+                    }
+                } else {
+                    Write-Log ("config.psd1 not found at: {0}; skipping CompanyName update." -f $psadtConfigPsd1Path) 'WARN'
+                }
+
+                } else {
+                    Write-Log ("Invoke-AppDeployToolkit.ps1 not found in Build directory: {0}" -f $invokeAdtPath) 'WARN'
+                }
+
+                # Update Build\Assets: delete *.png then copy files from Temp\branding
+                $psadtAssetsPath  = Join-Path $psadtDest 'Assets'
+                $brandingSource   = Join-Path $script:ScriptRootEffective 'Temp\branding'
+                if (Test-Path -LiteralPath $psadtAssetsPath) {
+                    try {
+                        $pngsToDelete = Get-ChildItem -LiteralPath $psadtAssetsPath -Filter '*.png' -File -ErrorAction SilentlyContinue
+                        if ($pngsToDelete -and $pngsToDelete.Count -gt 0) {
+                            foreach ($png in $pngsToDelete) {
+                                Remove-Item -LiteralPath $png.FullName -Force -ErrorAction SilentlyContinue
+                            }
+                            Write-Log ("Deleted {0} .png file(s) from Build\Assets." -f $pngsToDelete.Count) 'INFO'
+                        } else {
+                            Write-Log "No .png files found in Build\Assets to delete." 'DEBUG'
+                        }
+                    } catch {
+                        Write-Log ("Failed to delete .png files from Build\Assets: {0}" -f $_.Exception.Message) 'WARN'
+                    }
+                } else {
+                    Write-Log ("Build\Assets directory not found at: {0}; skipping .png deletion." -f $psadtAssetsPath) 'WARN'
+                }
+                if (Test-Path -LiteralPath $brandingSource) {
+                    try {
+                        $brandingFiles = Get-ChildItem -LiteralPath $brandingSource -File -ErrorAction SilentlyContinue
+                        if ($brandingFiles -and $brandingFiles.Count -gt 0) {
+                            if (-not (Test-Path -LiteralPath $psadtAssetsPath)) {
+                                $null = New-Item -ItemType Directory -Path $psadtAssetsPath -Force -ErrorAction SilentlyContinue
+                            }
+                            foreach ($bf in $brandingFiles) {
+                                Copy-Item -LiteralPath $bf.FullName -Destination (Join-Path $psadtAssetsPath $bf.Name) -Force -ErrorAction Stop
+                            }
+                            Write-Log ("Copied {0} branding file(s) from Temp\branding to Build\Assets." -f $brandingFiles.Count) 'INFO'
+                        } else {
+                            Write-Log "No files found in Temp\branding to copy." 'DEBUG'
+                        }
+                    } catch {
+                        Write-Log ("Failed to copy branding files to Build\Assets: {0}" -f $_.Exception.Message) 'WARN'
+                    }
+                } else {
+                    Write-Log ("Branding source not found at: {0}; skipping Assets copy." -f $brandingSource) 'WARN'
+                }
+
+            } catch {
+                Write-Log ("Failed to copy PSAppDeployToolkitv4: {0}" -f $_.Exception.Message) 'WARN'
+            }
+        } else {
+            Write-Log ("PSAppDeployToolkitv4 source not found at: {0}. Skipping Build copy." -f $psadtSource) 'WARN'
+        }
+    }
     # Normalize SourceForge URL to direct mirror so filename isn't just 'download'
     try {
         if ($installerUrl -match '^(?i)https?://sourceforge\.net/projects?/([^/]+)/files/(.+?)/download/?$') {
@@ -4830,7 +5258,269 @@ if ($cmp -le 0) {
     Write-Log ("Using installer file name: {0}" -f $installerName) 'DEBUG'
     $installerPath = Join-Path $downloadDir $installerName
 
+    # ===== Deferred Invoke-AppDeployToolkit.ps1 variable update (runs after $installerName is set) =====
+    $invokeAdtPath = $script:InvokeAdtPathDeferred
+    if ($invokeAdtPath -and (Test-Path -LiteralPath $invokeAdtPath)) {
+        try {
+            # Derive AppLang from recipe locale (e.g. en-US -> EN)
+            $recipeLocaleRaw = if ($recipeJson.InstallerPreferences.Locale) { $recipeJson.InstallerPreferences.Locale } else { 'en-US' }
+            $appLangValue = ($recipeLocaleRaw -split '-')[0].ToUpper()
+
+            # Pre-sanitize values (escape single quotes for PS string literals)
+            $adtVendor  = if ($publisher)     { $publisher.Replace("'", "''")     } else { '' }
+            $adtName    = if ($resolvedName)  { $resolvedName.Replace("'", "''")  } else { '' }
+            $adtVersion = if ($wingetVersion) { $wingetVersion.Replace("'", "''") } else { '' }
+            $adtArch    = if ($archChoice)    { $archChoice.Replace("'", "''")    } else { '' }
+
+            # Compute RequireAdmin from recipe InstallerPreferences.Scope
+            $requireAdminValue = if ($scopePref -and $scopePref.Trim().ToLower() -eq 'user') { '$false' } else { '$true' }
+
+            # Compute ForceCloseProcessesCountdown from recipe NotificationTimerInMinutes * 60
+            $adtForceCountdown = 120
+            try {
+                $np2 = $recipeJson.NotificationPopup
+                if ($np2 -and $np2.PSObject.Properties.Name -contains 'NotificationTimerInMinutes') {
+                    $adtMins = [int]$np2.NotificationTimerInMinutes
+                    if ($adtMins -gt 0) { $adtForceCountdown = $adtMins * 60 }
+                }
+            } catch {}
+
+            # Compute DeferDeadline from today + max DeadlineDelayDays across all rings
+            $adtMaxDelay = $null
+            try {
+                $adtRings = $recipeJson.Rings
+                if ($adtRings) {
+                    foreach ($rk in $adtRings.PSObject.Properties.Name) {
+                        try {
+                            $d = [int]$adtRings.$rk.DeadlineDelayDays
+                            if ($null -eq $adtMaxDelay -or $d -gt $adtMaxDelay) { $adtMaxDelay = $d }
+                        } catch {}
+                    }
+                }
+            } catch {}
+            if ($null -eq $adtMaxDelay) { $adtMaxDelay = -1 }
+            $adtDeferDeadline = (Get-Date).AddDays($adtMaxDelay).ToString('MM-dd-yyyy')
+
+            # Compute AppProcessesToClose array literal from recipe ForceTaskClose
+            $adtProcList = "@()"
+            try {
+                $adtForceSpec2 = $forceTaskCloseSpec
+                $adtProcs2 = @()
+                if ($adtForceSpec2) {
+                    if ($adtForceSpec2 -is [System.Collections.IEnumerable] -and -not ($adtForceSpec2 -is [string])) {
+                        foreach ($x in $adtForceSpec2) { if ($null -ne $x) { $adtProcs2 += $x.ToString().Trim() } }
+                    } else {
+                        foreach ($p in ($adtForceSpec2.ToString() -split "[`r`n,;]")) { $t = $p.Trim(); if ($t) { $adtProcs2 += $t } }
+                    }
+                    $adtProcs2 = $adtProcs2 | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+                    if ($adtProcs2.Count -gt 0) {
+                        $adtProcList = "@(" + (($adtProcs2 | ForEach-Object { "'" + ($_ -replace "'","''") + "'" }) -join ",") + ")"
+                    }
+                }
+            } catch {}
+
+            $adtReplacements = @{
+                'AppVendor'       = $adtVendor
+                'AppName'         = $adtName
+                'AppVersion'      = $adtVersion
+                'AppArch'         = $adtArch
+                'AppLang'         = $appLangValue
+                'AppScriptAuthor' = 'AutoPackager'
+                'DeferDeadline'   = $adtDeferDeadline
+            }
+            $phInvoke = Start-Phase 'InvokeADTUpdate'
+            $invokeLines = @(Get-Content -LiteralPath $invokeAdtPath -Encoding UTF8)
+            if ($invokeLines -and $invokeLines.Count -gt 0) {
+                $invokeTmp1 = @($invokeLines | ForEach-Object {
+                    $l = $_
+                    foreach ($k in $adtReplacements.Keys) {
+                        if ($l -match "(?i)^\s*$k\s*=\s*'") {
+                            $start = $l.IndexOf("'")
+                            $end   = $l.LastIndexOf("'")
+                            if ($start -ge 0 -and $end -gt $start) {
+                                $l = $l.Substring(0, $start + 1) + $adtReplacements[$k] + $l.Substring($end)
+                            }
+                            break
+                        }
+                    }
+                    $l
+                })
+                if ($invokeTmp1 -and $invokeTmp1.Count -gt 0) { $invokeLines = $invokeTmp1 }
+                # Fix ForceCloseProcessesCountdown (integer), AppProcessesToClose (array), RequireAdmin
+                $invokeTmp2 = @($invokeLines | ForEach-Object {
+                    $_ -replace '(?i)^(\s*ForceCloseProcessesCountdown\s*=\s*).*$', "`${1}$adtForceCountdown" `
+                       -replace '(?i)^(\s*AppProcessesToClose\s*=\s*)@\(\)(.*)$', "`${1}$adtProcList`${2}" `
+                       -replace '(?i)^(\s*RequireAdmin\s*=\s*).*$',               "`${1}$requireAdminValue"
+                })
+                if ($invokeTmp2 -and $invokeTmp2.Count -gt 0) { $invokeLines = $invokeTmp2 }
+
+                # Build uninstall line for injection
+                $adtInstallerTypeLower2 = ''
+                try { $adtInstallerTypeLower2 = ([string]$installerType).ToLower().Trim() } catch {}
+                if (-not $adtInstallerTypeLower2 -and $installerName -match '\.msi$') { $adtInstallerTypeLower2 = 'msi' }
+                if (-not $adtInstallerTypeLower2 -and $installerName -match '\.exe$') { $adtInstallerTypeLower2 = 'exe' }
+                if ($adtVendor) {
+                    $adtUninstallLine2 = "    Uninstall-ADTApplication -Name '$adtName' -ApplicationType '$adtInstallerTypeLower2' -FilterScript { `$_.Publisher -match '$adtVendor' }"
+                } else {
+                    $adtUninstallLine2 = "    Uninstall-ADTApplication -Name '$adtName' -ApplicationType '$adtInstallerTypeLower2'"
+                }
+                $adtUninstallArgsRaw2 = ''
+                try { if ($uninstallArgsFromRecipe -and $uninstallArgsFromRecipe.Trim()) { $adtUninstallArgsRaw2 = $uninstallArgsFromRecipe.Trim() } } catch {}
+                if ($adtUninstallArgsRaw2) {
+                    $adtUninstallLine2 += " -ArgumentList '$($adtUninstallArgsRaw2.Replace("'","''"))'"
+                }
+
+                # ForceUninstall injection into Install-ADTDeployment
+                if ($recipeJson.ForceUninstall -eq $true) {
+                    $adtInInstFn = $false; $adtAlrInj = $false
+                    foreach ($adtL in $invokeLines) {
+                        if ($adtL -match '^function Install-ADTDeployment') { $adtInInstFn = $true; continue }
+                        if ($adtInInstFn -and $adtL -match '^function ') { break }
+                        if ($adtInInstFn -and $adtL -match 'Uninstall-ADTApplication') { $adtAlrInj = $true; break }
+                    }
+                    if (-not $adtAlrInj) {
+                        $adtNew = [System.Collections.Generic.List[string]]::new()
+                        foreach ($adtL in $invokeLines) {
+                            $adtNew.Add($adtL)
+                            if ($adtL -match '##\s*<Perform Pre-Installation tasks here>') { $adtNew.Add($adtUninstallLine2) }
+                        }
+                        $invokeLines = $adtNew.ToArray()
+                        Write-Log "Injected Uninstall-ADTApplication into Install-ADTDeployment Pre-Installation anchor." 'INFO'
+                    }
+                }
+
+                # Always inject into Uninstall-ADTDeployment
+                $adtInUnFn = $false; $adtAlrInjUn = $false
+                foreach ($adtL in $invokeLines) {
+                    if ($adtL -match '^function Uninstall-ADTDeployment') { $adtInUnFn = $true; continue }
+                    if ($adtInUnFn -and $adtL -match '^function ') { break }
+                    if ($adtInUnFn -and $adtL -match 'Uninstall-ADTApplication') { $adtAlrInjUn = $true; break }
+                }
+                if (-not $adtAlrInjUn) {
+                    $adtNewUn = [System.Collections.Generic.List[string]]::new(); $adtInUnFn2 = $false
+                    foreach ($adtL in $invokeLines) {
+                        if ($adtL -match '^function Uninstall-ADTDeployment') { $adtInUnFn2 = $true }
+                        if ($adtInUnFn2 -and $adtL -match '^function ' -and $adtL -notmatch '^function Uninstall-ADTDeployment') { $adtInUnFn2 = $false }
+                        $adtNewUn.Add($adtL)
+                        if ($adtInUnFn2 -and $adtL -match '##\s*<Perform Uninstallation tasks here>') { $adtNewUn.Add($adtUninstallLine2) }
+                    }
+                    $invokeLines = $adtNewUn.ToArray()
+                    Write-Log "Injected Uninstall-ADTApplication into Uninstall-ADTDeployment." 'INFO'
+                }
+
+                # Always inject into Repair-ADTDeployment
+                $adtInRepFn = $false; $adtAlrInjRep = $false
+                foreach ($adtL in $invokeLines) {
+                    if ($adtL -match '^function Repair-ADTDeployment') { $adtInRepFn = $true; continue }
+                    if ($adtInRepFn -and $adtL -match '^function ') { break }
+                    if ($adtInRepFn -and $adtL -match 'Uninstall-ADTApplication') { $adtAlrInjRep = $true; break }
+                }
+                if (-not $adtAlrInjRep) {
+                    $adtNewRep = [System.Collections.Generic.List[string]]::new(); $adtInRepFn2 = $false
+                    foreach ($adtL in $invokeLines) {
+                        if ($adtL -match '^function Repair-ADTDeployment') { $adtInRepFn2 = $true }
+                        if ($adtInRepFn2 -and $adtL -match '^function ' -and $adtL -notmatch '^function Repair-ADTDeployment') { $adtInRepFn2 = $false }
+                        $adtNewRep.Add($adtL)
+                        if ($adtInRepFn2 -and $adtL -match '##\s*<Perform Repair tasks here>') { $adtNewRep.Add($adtUninstallLine2) }
+                    }
+                    $invokeLines = $adtNewRep.ToArray()
+                    Write-Log "Injected Uninstall-ADTApplication into Repair-ADTDeployment." 'INFO'
+                }
+
+                # Build install line (used for Install-ADTDeployment and Repair-ADTDeployment)
+                $adtInstallLine2 = $null
+                $adtInstallArgsEsc2 = ''
+                try { if ($installArgsFromRecipe) { $adtInstallArgsEsc2 = $installArgsFromRecipe.Trim().Replace("'","''") } } catch {}
+                if ($adtInstallerTypeLower2 -eq 'msi') {
+                    $adtInstallLine2 = "    Start-ADTMsiProcess -Action Install -FilePath "".\Files\$($installerName.Replace("'","''"))"" -ArgumentList '$adtInstallArgsEsc2'"
+                } elseif ($adtInstallerTypeLower2 -eq 'exe') {
+                    $adtInstallLine2 = "    Start-ADTProcess -FilePath "".\Files\$($installerName.Replace("'","''"))"" -ArgumentList '$adtInstallArgsEsc2' -WindowStyle Hidden -WaitForChildProcesses"
+                }
+                if ($adtInstallLine2) {
+                    # Inject install command into Install-ADTDeployment at Installation tasks anchor
+                    $adtInInstFnI = $false; $adtAlrInjInst = $false
+                    foreach ($adtL in $invokeLines) {
+                        if ($adtL -match '^function Install-ADTDeployment') { $adtInInstFnI = $true; continue }
+                        if ($adtInInstFnI -and $adtL -match '^function ') { break }
+                        if ($adtInInstFnI -and ($adtL -match 'Install-ADTMsiPackage' -or $adtL -match 'Start-ADTProcess')) { $adtAlrInjInst = $true; break }
+                    }
+                    if (-not $adtAlrInjInst) {
+                        $adtNewInst = [System.Collections.Generic.List[string]]::new(); $adtInInstFnI2 = $false
+                        foreach ($adtL in $invokeLines) {
+                            if ($adtL -match '^function Install-ADTDeployment') { $adtInInstFnI2 = $true }
+                            if ($adtInInstFnI2 -and $adtL -match '^function ' -and $adtL -notmatch '^function Install-ADTDeployment') { $adtInInstFnI2 = $false }
+                            $adtNewInst.Add($adtL)
+                            if ($adtInInstFnI2 -and $adtL -match '##\s*<Perform Installation tasks here>') { $adtNewInst.Add($adtInstallLine2) }
+                        }
+                        $invokeLines = $adtNewInst.ToArray()
+                        Write-Log ("Injected install command into Install-ADTDeployment (type={0})." -f $adtInstallerTypeLower2) 'INFO'
+                    }
+
+                    # Inject install command into Repair-ADTDeployment after Uninstall-ADTApplication line
+                    $adtInRepFnInst = $false; $adtAlrInjRepInst = $false
+                    foreach ($adtL in $invokeLines) {
+                        if ($adtL -match '^function Repair-ADTDeployment') { $adtInRepFnInst = $true; continue }
+                        if ($adtInRepFnInst -and $adtL -match '^function ') { break }
+                        if ($adtInRepFnInst -and ($adtL -match 'Install-ADTMsiPackage' -or $adtL -match 'Start-ADTProcess')) { $adtAlrInjRepInst = $true; break }
+                    }
+                    if (-not $adtAlrInjRepInst) {
+                        $adtNewRepInst = [System.Collections.Generic.List[string]]::new(); $adtInRepFnInst2 = $false; $adtRepInjectedUninstall = $false
+                        foreach ($adtL in $invokeLines) {
+                            if ($adtL -match '^function Repair-ADTDeployment') { $adtInRepFnInst2 = $true }
+                            if ($adtInRepFnInst2 -and $adtL -match '^function ' -and $adtL -notmatch '^function Repair-ADTDeployment') { $adtInRepFnInst2 = $false }
+                            $adtNewRepInst.Add($adtL)
+                            # Insert install line immediately after the Uninstall-ADTApplication line in Repair-ADTDeployment
+                            if ($adtInRepFnInst2 -and -not $adtRepInjectedUninstall -and $adtL -match 'Uninstall-ADTApplication') {
+                                $adtNewRepInst.Add($adtInstallLine2)
+                                $adtRepInjectedUninstall = $true
+                            }
+                        }
+                        $invokeLines = $adtNewRepInst.ToArray()
+                        Write-Log ("Injected install command into Repair-ADTDeployment after Uninstall-ADTApplication (type={0})." -f $adtInstallerTypeLower2) 'INFO'
+                    } else {
+                        Write-Log "Install command already present in Repair-ADTDeployment; skipping injection." 'DEBUG'
+                    }
+                }
+
+                # Comment out any active Show-ADTInstallationPrompt lines
+                $invokeLinesTmp = @($invokeLines | ForEach-Object {
+                    if ($_ -match '^\s*Show-ADTInstallationPrompt') { "# $_" } else { $_ }
+                })
+                if ($invokeLinesTmp -and $invokeLinesTmp.Count -gt 0) { $invokeLines = $invokeLinesTmp }
+                Write-Log ("Pre-write invokeLines count: {0}" -f @($invokeLines).Count) 'INFO'
+                if ($invokeLines -and @($invokeLines).Count -gt 0) {
+                    Set-Content -LiteralPath $invokeAdtPath -Value $invokeLines -Encoding UTF8
+                    Write-Log "Invoke-AppDeployToolkit.ps1 updated successfully." 'INFO'
+                } else {
+                    Write-Log "Invoke-AppDeployToolkit.ps1 invokeLines was empty before write; skipping to protect file." 'WARN'
+                }
+            } else {
+                Write-Log "Invoke-AppDeployToolkit.ps1 read returned empty; skipping write." 'WARN'
+            }
+            Stop-Phase $phInvoke
+        } catch {
+            Write-Log ("Failed to update Invoke-AppDeployToolkit.ps1: {0}" -f $_.Exception.Message) 'WARN'
+        }
+    } else {
+        Write-Log ("Invoke-AppDeployToolkit.ps1 not found at deferred path: {0}" -f $invokeAdtPath) 'WARN'
+    }
+
+    $phDl = Start-Phase 'InstallerDownload'
     Download-File -Url $installerUrl -Destination $installerPath -WingetId $wingetId
+    Stop-Phase $phDl
+
+    # Copy installer into Build\Files after download
+    try {
+        $buildFilesDir = Join-Path $archRoot (Join-Path 'Build' 'Files')
+        if (Test-Path -LiteralPath $buildFilesDir) {
+            Copy-Item -LiteralPath $installerPath -Destination (Join-Path $buildFilesDir $installerName) -Force -ErrorAction Stop
+            Write-Log ("Installer copied to Build\Files: {0}" -f (Join-Path $buildFilesDir $installerName)) 'INFO'
+        } else {
+            Write-Log ("Build\Files directory not present; skipping installer copy to Build\Files." ) 'DEBUG'
+        }
+    } catch {
+        Write-Log ("Failed to copy installer to Build\Files: {0}" -f $_.Exception.Message) 'WARN'
+    }
 
     # Ensure/normalize MSI ProductCode prior to script generation so uninstall.ps1 bakes in msiexec /x {ProductCode}
     try {
@@ -4920,8 +5610,14 @@ if ($cmp -le 0) {
     } catch { $maxDelayDays = 0 }
     $deferralHoursTotal = ([int]$deferralHours) + ([int]$maxDelayDays * 24)
 
+    #TOBEDELETED - BEGIN (ScriptGeneration call block - install.ps1 / uninstall.ps1)
+    <#
+    $phGen = Start-Phase 'ScriptGeneration'
     Generate-InstallScript -VersionRoot $archRoot -DownloadDir $downloadDir -InstallerName $installerName -InstallArgs $installArgsFromRecipe -ForceTaskCloseSpec $forceTaskCloseSpec -AppNameForLogs $resolvedName -AppVersionForLogs $wingetVersion -NotificationPopupFlag $notifEnabled -ProductCode $productCode -ForceUninstallFlag ([bool]$recipeJson.ForceUninstall) -UninstallArgsPre $uninstallArgsFromRecipe -NotificationTimeoutSeconds $notifTimeout -DeferralHoursAllowed $deferralHoursTotal -DeferralAllowed $deferralEnabled
     Generate-UninstallScript -VersionRoot $archRoot -DownloadDir $downloadDir -InstallerName $installerName -UninstallArgs $uninstallArgsFromRecipe -ForceTaskCloseSpec $forceTaskCloseSpec -ProductCode $productCode -AppNameForLogs $resolvedName -AppVersionForLogs $wingetVersion
+    Stop-Phase $phGen
+    #>
+    #TOBEDELETED - END (ScriptGeneration call block - install.ps1 / uninstall.ps1)
 
     # Generate detection script file for both PackageOnly and full runs
     $null = Generate-DetectionScriptFile -AppName $resolvedName -RequiredVersion $wingetVersion -ProductCode $productCode -VersionRootPath $archRoot
@@ -4932,7 +5628,18 @@ $reqNotInstalledPath = Generate-RequirementNotInstalledScript -AppName $resolved
 
     $outDir  = Ensure-Dir (Join-Path $archRoot 'Output')
     $outDirPkg = Ensure-Dir (Join-Path $outDir 'Package')
-    $intunewin = Wrap-IntuneWin -SourceDir $downloadDir -SetupFileName 'install.ps1' -OutputDir $outDirPkg
+    $phWrap = Start-Phase 'IntuneWinWrap'
+    $buildDir  = Join-Path $archRoot 'Build'
+    $intunewin = Wrap-IntuneWin -SourceDir $buildDir -SetupFileName 'Invoke-AppDeployToolkit.ps1' -OutputDir $outDirPkg
+    Stop-Phase $phWrap
+
+    # Unblock all PS1 files in Working directory to suppress security warnings
+    try {
+        Get-ChildItem -Path $WorkingRoot -Recurse -Include "*.ps1" -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
+        Write-Log ("Unblocked all .ps1 files under Working directory: {0}" -f $WorkingRoot) 'INFO'
+    } catch {
+        Write-Log ("Failed to unblock .ps1 files: {0}" -f $_.Exception.Message) 'WARN'
+    }
 
     if ($script:EffectivePackageOnly) {
         Write-Log ("PackageOnly: Skipping upload. Wrapped file at: {0}" -f $intunewin) 'INFO'
@@ -5005,8 +5712,8 @@ if (($installerType -eq 'msi') -or ($installerName -match '\.msi$')) {
 $useScriptCmds = $true
 try { if ($script:Config -and $script:Config.PackagingDefaults -and ($null -ne $script:Config.PackagingDefaults.UseScriptCommandLines)) { $useScriptCmds = [bool]$script:Config.PackagingDefaults.UseScriptCommandLines } } catch {}
 if ($useScriptCmds) {
-    $installCmd = 'powershell.exe -ExecutionPolicy Bypass -File "install.ps1"'
-    $uninstallCmd = 'powershell.exe -ExecutionPolicy Bypass -File "uninstall.ps1"'
+    $installCmd   = 'powershell.exe -ExecutionPolicy Bypass -File "Invoke-AppDeployToolkit.ps1"'
+    $uninstallCmd = 'powershell.exe -ExecutionPolicy Bypass -File "Invoke-AppDeployToolkit.ps1" -DeploymentType Uninstall'
     Write-Log ("Install command overridden to: {0}" -f $installCmd) 'INFO'
     Write-Log ("Uninstall command set to: {0}" -f $uninstallCmd) 'INFO'
 } else {
@@ -5015,6 +5722,7 @@ if ($useScriptCmds) {
 $didCommandsAtUpload = $true
 $priUploadSucceeded = $true
 $priUploadError = $null
+$phUpload = Start-Phase 'IntuneUpload'
 try {
     Update-IntuneAppContent -AppId $intuneAppId -IntunewinPath $intunewin -InstallCommandLine $installCmd -UninstallCommandLine $uninstallCmd
 } catch {
@@ -5022,6 +5730,7 @@ try {
     $priUploadError = $_.Exception.Message
     Write-Log ("Primary Update-IntuneAppContent failed: {0}" -f $priUploadError) 'ERROR'
 }
+Stop-Phase $phUpload
 # Immediate read-back to confirm command lines post-upload (since we updated inside Update-IntuneAppContent)
 try {
     $verifyCmds = Get-IntuneWin32App -Id $intuneAppId -ErrorAction Stop
@@ -5101,6 +5810,7 @@ try {
         Write-Log "SkipVerify set; skipping post-upload verification." 'WARN'
     } else {
         $ok = $false
+        $phVerify = Start-Phase 'IntuneVerify'
         try {
             $ok = Verify-IntuneUpload -AppId $intuneAppId `
                  -TargetDisplayVersion $wingetVersion `
@@ -5111,6 +5821,7 @@ try {
         } catch {
             Write-Log ("Verify-IntuneUpload threw: {0}" -f $_.Exception.Message) 'WARN'
         }
+        Stop-Phase $phVerify
 
         # Additional check: ensure module-reported content size changed vs pre-check (ignore local .intunewin size)
         if ($ok -and ($preModuleSize -ne $null)) {
@@ -5921,103 +6632,107 @@ try {
     try { if ($script:Config -and $script:Config.Archive -and $script:Config.Archive.RetentionDays) { $retentionDays = [int]$script:Config.Archive.RetentionDays } } catch {}
     $cutoff = (Get-Date).AddDays(-$retentionDays)
 
-    # Archive Working subfolders to network location (config-driven)
-    try {
-        $archiveEnabled = $true
-        try { if ($script:Config -and $script:Config.Archive -and ($null -ne $script:Config.Archive.Enabled)) { $archiveEnabled = [bool]$script:Config.Archive.Enabled } } catch { }
-        if (-not $archiveEnabled) {
-            Write-Log "Archive step disabled by config." 'INFO'
-            return
-        }
+    # Archive Working subfolders to network location (config-driven, FullRun only)
+    if (-not $script:EffectivePackageOnly) {
+        try {
+            $archiveEnabled = $true
+            try { if ($script:Config -and $script:Config.Archive -and ($null -ne $script:Config.Archive.Enabled)) { $archiveEnabled = [bool]$script:Config.Archive.Enabled } } catch { }
+            if (-not $archiveEnabled) {
+                Write-Log "Archive step disabled by config." 'INFO'
+                return
+            }
 
-        $networkArchiveRoot = $null
-        try { if ($script:Config -and $script:Config.Archive -and $script:Config.Archive.NetworkArchiveRoot) { $networkArchiveRoot = [string]$script:Config.Archive.NetworkArchiveRoot } } catch { }
-        if (-not $networkArchiveRoot -or [string]::IsNullOrWhiteSpace($networkArchiveRoot)) {
-            Write-Log "Archive enabled but Archive.NetworkArchiveRoot is not set in config; skipping archive." 'WARN'
-            return
-        }
+            $networkArchiveRoot = $null
+            try { if ($script:Config -and $script:Config.Archive -and $script:Config.Archive.NetworkArchiveRoot) { $networkArchiveRoot = [string]$script:Config.Archive.NetworkArchiveRoot } } catch { }
+            if (-not $networkArchiveRoot -or [string]::IsNullOrWhiteSpace($networkArchiveRoot)) {
+                Write-Log "Archive enabled but Archive.NetworkArchiveRoot is not set in config; skipping archive." 'WARN'
+                return
+            }
 
-        try { $null = New-Item -ItemType Directory -Path $networkArchiveRoot -Force -ErrorAction Stop } catch { }
+            try { $null = New-Item -ItemType Directory -Path $networkArchiveRoot -Force -ErrorAction Stop } catch { }
 
-        if ($WorkingRoot -and (Test-Path -LiteralPath $WorkingRoot)) {
-            $subdirs = Get-ChildItem -LiteralPath $WorkingRoot -Directory -Force -ErrorAction SilentlyContinue
-            if ($subdirs) {
-                foreach ($dir in $subdirs) {
-                    try {
-                        Write-Log ("Archiving Working subfolder '{0}' to '{1}'" -f $dir.FullName, $networkArchiveRoot) 'INFO'
-                        Copy-Item -LiteralPath $dir.FullName -Destination $networkArchiveRoot -Recurse -Force -ErrorAction Stop
-                    } catch {
-                        Write-Log ("Archive copy failed for '{0}' -> '{1}': {2}" -f $dir.FullName, $networkArchiveRoot, $_.Exception.Message) 'WARN'
+            if ($WorkingRoot -and (Test-Path -LiteralPath $WorkingRoot)) {
+                $subdirs = Get-ChildItem -LiteralPath $WorkingRoot -Directory -Force -ErrorAction SilentlyContinue
+                if ($subdirs) {
+                    foreach ($dir in $subdirs) {
+                        try {
+                            Write-Log ("Archiving Working subfolder '{0}' to '{1}'" -f $dir.FullName, $networkArchiveRoot) 'INFO'
+                            Copy-Item -LiteralPath $dir.FullName -Destination $networkArchiveRoot -Recurse -Force -ErrorAction Stop
+                        } catch {
+                            Write-Log ("Archive copy failed for '{0}' -> '{1}': {2}" -f $dir.FullName, $networkArchiveRoot, $_.Exception.Message) 'WARN'
+                        }
                     }
-                }
 
-                # Retain only the N newest version folders per app (from config; default 3)
-                try {
-                    $keep = 3
-                    try { if ($script:Config -and $script:Config.Archive -and $script:Config.Archive.KeepVersionsPerApp) { $keep = [int]$script:Config.Archive.KeepVersionsPerApp } } catch { }
-                    Write-Log ("Archive retention: keeping {0} newest version folders per app (only apps touched this run)" -f $keep) 'INFO'
+                    # Retain only the N newest version folders per app (from config; default 3)
+                    try {
+                        $keep = 3
+                        try { if ($script:Config -and $script:Config.Archive -and $script:Config.Archive.KeepVersionsPerApp) { $keep = [int]$script:Config.Archive.KeepVersionsPerApp } } catch { }
+                        Write-Log ("Archive retention: keeping {0} newest version folders per app (only apps touched this run)" -f $keep) 'INFO'
 
-                    $pubsWorked = Get-ChildItem -LiteralPath $WorkingRoot -Directory -ErrorAction SilentlyContinue
-                    foreach ($pub in ($pubsWorked | Where-Object { $_ })) {
-                        $appsWorked = Get-ChildItem -LiteralPath $pub.FullName -Directory -ErrorAction SilentlyContinue
-                        foreach ($app in ($appsWorked | Where-Object { $_ })) {
-                            $appArchive = Join-Path $networkArchiveRoot (Join-Path $pub.Name $app.Name)
-                            if (-not (Test-Path -LiteralPath $appArchive)) {
-                                Write-Log ("Archive retention: path not found, skipping '{0}'" -f $appArchive) 'DEBUG'
-                                continue
-                            }
+                        $pubsWorked = Get-ChildItem -LiteralPath $WorkingRoot -Directory -ErrorAction SilentlyContinue
+                        foreach ($pub in ($pubsWorked | Where-Object { $_ })) {
+                            $appsWorked = Get-ChildItem -LiteralPath $pub.FullName -Directory -ErrorAction SilentlyContinue
+                            foreach ($app in ($appsWorked | Where-Object { $_ })) {
+                                $appArchive = Join-Path $networkArchiveRoot (Join-Path $pub.Name $app.Name)
+                                if (-not (Test-Path -LiteralPath $appArchive)) {
+                                    Write-Log ("Archive retention: path not found, skipping '{0}'" -f $appArchive) 'DEBUG'
+                                    continue
+                                }
 
-                            $verDirs = Get-ChildItem -LiteralPath $appArchive -Directory -ErrorAction SilentlyContinue
-                            if (-not $verDirs -or $verDirs.Count -le $keep) { continue }
+                                $verDirs = Get-ChildItem -LiteralPath $appArchive -Directory -ErrorAction SilentlyContinue
+                                if (-not $verDirs -or $verDirs.Count -le $keep) { continue }
 
-                            $verObjs = @()
-                            foreach ($vd in $verDirs) {
-                                $parsed = $null
-                                $isVersion = $false
-                                try {
-                                    $parsed = [version]$vd.Name
-                                    $isVersion = $true
-                                } catch {
-                                    if ($vd.Name -match '^\d+(?:\.\d+){1,3}') {
-                                        $prefix = $matches[0]
-                                        try { $parsed = [version]$prefix; $isVersion = $true } catch { }
+                                $verObjs = @()
+                                foreach ($vd in $verDirs) {
+                                    $parsed = $null
+                                    $isVersion = $false
+                                    try {
+                                        $parsed = [version]$vd.Name
+                                        $isVersion = $true
+                                    } catch {
+                                        if ($vd.Name -match '^\d+(?:\.\d+){1,3}') {
+                                            $prefix = $matches[0]
+                                            try { $parsed = [version]$prefix; $isVersion = $true } catch { }
+                                        }
+                                    }
+                                    if ($isVersion) {
+                                        $verObjs += [pscustomobject]@{
+                                            Dir           = $vd
+                                            Version       = $parsed
+                                            LastWriteTime = $vd.LastWriteTime
+                                        }
                                     }
                                 }
-                                if ($isVersion) {
-                                    $verObjs += [pscustomobject]@{
-                                        Dir           = $vd
-                                        Version       = $parsed
-                                        LastWriteTime = $vd.LastWriteTime
+
+                                if (-not $verObjs -or $verObjs.Count -le $keep) { continue }
+
+                                $sorted = $verObjs | Sort-Object `
+                                    @{ Expression = { if ($_.Version) { $_.Version } else { [version]'0.0.0.0' } }; Descending = $true }, `
+                                    @{ Expression = { $_.LastWriteTime }; Descending = $true }
+
+                                $toDelete = $sorted | Select-Object -Skip $keep
+                                foreach ($d in $toDelete) {
+                                    try {
+                                        Remove-Item -LiteralPath $d.Dir.FullName -Recurse -Force -ErrorAction Stop
+                                        Write-Log ("Archive retention: removed old version '{0}\{1}\{2}'" -f $pub.Name, $app.Name, $d.Dir.Name) 'INFO'
+                                    } catch {
+                                        Write-Log ("Archive retention: failed to remove '{0}': {1}" -f $d.Dir.FullName, $_.Exception.Message) 'WARN'
                                     }
-                                }
-                            }
-
-                            if (-not $verObjs -or $verObjs.Count -le $keep) { continue }
-
-                            $sorted = $verObjs | Sort-Object `
-                                @{ Expression = { if ($_.Version) { $_.Version } else { [version]'0.0.0.0' } }; Descending = $true }, `
-                                @{ Expression = { $_.LastWriteTime }; Descending = $true }
-
-                            $toDelete = $sorted | Select-Object -Skip $keep
-                            foreach ($d in $toDelete) {
-                                try {
-                                    Remove-Item -LiteralPath $d.Dir.FullName -Recurse -Force -ErrorAction Stop
-                                    Write-Log ("Archive retention: removed old version '{0}\{1}\{2}'" -f $pub.Name, $app.Name, $d.Dir.Name) 'INFO'
-                                } catch {
-                                    Write-Log ("Archive retention: failed to remove '{0}': {1}" -f $d.Dir.FullName, $_.Exception.Message) 'WARN'
                                 }
                             }
                         }
+                    } catch {
+                        Write-Log ("Archive retention step failed: {0}" -f $_.Exception.Message) 'WARN'
                     }
-                } catch {
-                    Write-Log ("Archive retention step failed: {0}" -f $_.Exception.Message) 'WARN'
+                } else {
+                    Write-Log "No Working subfolders found to archive to network path." 'DEBUG'
                 }
-            } else {
-                Write-Log "No Working subfolders found to archive to network path." 'DEBUG'
             }
+        } catch {
+            Write-Log ("Network archive copy encountered error: {0}" -f $_.Exception.Message) 'WARN'
         }
-    } catch {
-        Write-Log ("Network archive copy encountered error: {0}" -f $_.Exception.Message) 'WARN'
+    } else {
+        Write-Log "Archive and retention steps skipped (PackageOnly mode)." 'INFO'
     }
 
     # Working folder: Summary_*.csv and AutoPackager_*.log (email attachment copies)

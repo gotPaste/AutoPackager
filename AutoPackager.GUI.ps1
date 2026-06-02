@@ -3140,11 +3140,16 @@ $btnPrereq.Add_Click({
       if ($mod) { Append-OutputColored $txtPrereqOut "Microsoft.WinGet.Client module: FOUND" 'Green' } else { Append-OutputColored $txtPrereqOut "Microsoft.WinGet.Client module: NOT FOUND" 'Red' }
     } catch {}
 
-    # powershell-yaml module (used for YAML parsing)
+    # Powershell-YAML module (used for YAML parsing)
     try {
-      $mod = Get-Module -ListAvailable -Name 'powershell-yaml' | Select-Object -First 1
-      if (-not $mod) { $mod = Get-Module -ListAvailable -Name 'Powershell-YAML' | Select-Object -First 1 }
-      if ($mod) { Append-OutputColored $txtPrereqOut "powershell-yaml module: FOUND" 'Green' } else { Append-OutputColored $txtPrereqOut "powershell-yaml module: NOT FOUND" 'Red' }
+      $mod = Get-Module -ListAvailable -Name 'Powershell-YAML' | Select-Object -First 1
+      if ($mod) { Append-OutputColored $txtPrereqOut "Powershell-YAML module: FOUND" 'Green' } else { Append-OutputColored $txtPrereqOut "Powershell-YAML module: NOT FOUND" 'Red' }
+    } catch {}
+
+    # PSAppDeployToolkit module (used to create install/uninstall scripts)
+    try {
+      $mod = Get-Module -ListAvailable -Name 'PSAppDeployToolkit' | Select-Object -First 1
+      if ($mod) { Append-OutputColored $txtPrereqOut "PSAppDeployToolkit module: FOUND" 'Green' } else { Append-OutputColored $txtPrereqOut "PSAppDeployToolkit module: NOT FOUND" 'Red' }
     } catch {}
 
     # IntuneWin32App module (used by Create/Find helpers)
