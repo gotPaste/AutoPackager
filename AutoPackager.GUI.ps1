@@ -2128,6 +2128,7 @@ $grpNotif.Controls.AddRange(@($chkNotifEnabled,$lblNotifMins,$numNotifMins,$chkD
 # New: ForceTaskClose editor (one per line)
 $lblFTC = New-Label "ForceTaskClose (one per line):" 10 208 160
 $tbFTC  = New-TextBox 170 205 400 70 $true $false
+$lblFTC1 = New-Label "Automatically enables popup" 10 228 160
 
 # New: Rings editor
 $grpRings = New-Group "Required Update Deployment Rings" 10 370 1160 120
@@ -2316,7 +2317,7 @@ $grpQuickEdit.Controls.AddRange(@(
   $lblInstallArgs,$tbInstallArgs,
   $lblUninstArgs,$tbUninstArgs,
   $chkForceUninstall,$chkAllowAvailUninst,
-  $lblFTC,$tbFTC,
+  $lblFTC,$lblFTC1,$tbFTC,
   $grpNotif,
   $grpRings
 ))

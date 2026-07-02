@@ -5352,6 +5352,29 @@ if ($cmp -le 0) {
                 })
                 if ($invokeTmp2 -and $invokeTmp2.Count -gt 0) { $invokeLines = $invokeTmp2 }
 
+                # Restructure $saiwParams: move ForceCloseProcessesCountdown and DeferDeadline inside the if block
+                # so they are only passed when CloseProcesses is also present (prevents AmbiguousParameterSet)
+                $fccLineMatch   = $invokeLines | Where-Object { $_ -match '(?i)^\s*ForceCloseProcessesCountdown\s*=\s*\d+\s*$' } | Select-Object -First 1
+                $deferLineMatch = $invokeLines | Where-Object { $_ -match "(?i)^\s*DeferDeadline\s*=\s*'[^']*'\s*$" } | Select-Object -First 1
+                if ($fccLineMatch -or $deferLineMatch) {
+                    $fccVal = $null
+                    if ($fccLineMatch -and $fccLineMatch -match '(?i)ForceCloseProcessesCountdown\s*=\s*(\d+)') { $fccVal = $Matches[1] }
+                    $deferVal = $null
+                    if ($deferLineMatch -and $deferLineMatch -match "(?i)DeferDeadline\s*=\s*'([^']*)'") { $deferVal = $Matches[1] }
+                    $invokeTmp3 = [System.Collections.Generic.List[string]]::new()
+                    foreach ($ln in $invokeLines) {
+                        if ($ln -match '(?i)^\s*ForceCloseProcessesCountdown\s*=\s*\d+\s*$') { continue }
+                        if ($ln -match "(?i)^\s*DeferDeadline\s*=\s*'[^']*'\s*$") { continue }
+                        $invokeTmp3.Add($ln)
+                        if ($ln -match '(?i)\$saiwParams\.Add\(''AllowDeferCloseProcesses''') {
+                            if ($fccVal)   { $invokeTmp3.Add("`$saiwParams.Add('ForceCloseProcessesCountdown', $fccVal)") }
+                            if ($deferVal) { $invokeTmp3.Add("`$saiwParams.Add('DeferDeadline', '$deferVal')") }
+                        }
+                    }
+                    $invokeLines = $invokeTmp3.ToArray()
+                    Write-Log 'Restructured $saiwParams: moved ForceCloseProcessesCountdown and DeferDeadline inside if-block (prevents AmbiguousParameterSet when no processes to close).' 'INFO'
+                }
+
                 # Build uninstall line for injection
                 $adtInstallerTypeLower2 = ''
                 try { $adtInstallerTypeLower2 = ([string]$installerType).ToLower().Trim() } catch {}
@@ -5480,11 +5503,72 @@ if ($cmp -le 0) {
                     }
                 }
 
-                # Comment out any active Show-ADTInstallationPrompt lines
+                # Comment out any active Show-ADTInstallationPrompt and Show-ADTInstallationProgress lines
                 $invokeLinesTmp = @($invokeLines | ForEach-Object {
-                    if ($_ -match '^\s*Show-ADTInstallationPrompt') { "# $_" } else { $_ }
+                    if ($_ -match '^\s*Show-ADTInstallationPrompt' -or $_ -match '^\s*Show-ADTInstallationProgress') { "# $_" } else { $_ }
                 })
                 if ($invokeLinesTmp -and $invokeLinesTmp.Count -gt 0) { $invokeLines = $invokeLinesTmp }
+
+                # Normalize CloseProcessesCountdown in all Show-ADTInstallationWelcome calls to match $adtForceCountdown
+                $invokeTmpCountdown = @($invokeLines | ForEach-Object {
+                    $_ -replace '(?i)(Show-ADTInstallationWelcome\b.*-CloseProcessesCountdown\s+)\d+', "`${1}$adtForceCountdown"
+                })
+                if ($invokeTmpCountdown -and $invokeTmpCountdown.Count -gt 0) { $invokeLines = $invokeTmpCountdown }
+                Write-Log ("CloseProcessesCountdown normalized to {0} in all Show-ADTInstallationWelcome calls." -f $adtForceCountdown) 'INFO'
+
+                # Wrap Show-ADTInstallationWelcome with notificationPopupEnabled guard based on recipe NotificationPopup.Enabled
+                $adtNotifEnabled3 = $false
+                try {
+                    $np3 = $recipeJson.NotificationPopup
+                    if ($np3 -and $np3.PSObject.Properties.Name -contains 'Enabled') {
+                        $adtNotifEnabled3 = [bool]$np3.Enabled
+                    }
+                } catch {}
+                $adtNotifEnabledStr3 = if ($adtNotifEnabled3) { '$true' } else { '$false' }
+
+                # Inject $notificationPopupEnabled variable after the $adtSession hashtable closing brace
+                # Use a brace-depth counter so we only fire on the outermost closing } of $adtSession = @{
+                $adtInSessionBlock = $false; $adtSessionVarInjected = $false; $adtSessionDepth = 0
+                $invokeTmpNotifInj = [System.Collections.Generic.List[string]]::new()
+                foreach ($adtL in $invokeLines) {
+                    if (-not $adtSessionVarInjected -and $adtL -match '^\$adtSession\s*=\s*@\{') {
+                        $adtInSessionBlock = $true
+                        $adtSessionDepth = 1
+                    } elseif ($adtInSessionBlock -and -not $adtSessionVarInjected) {
+                        # Count { and } to track nesting depth
+                        $openCount  = ([regex]::Matches($adtL, '\{')).Count
+                        $closeCount = ([regex]::Matches($adtL, '\}')).Count
+                        $adtSessionDepth += $openCount - $closeCount
+                    }
+                    $invokeTmpNotifInj.Add($adtL)
+                    if ($adtInSessionBlock -and -not $adtSessionVarInjected -and $adtSessionDepth -le 0) {
+                        $invokeTmpNotifInj.Add("")
+                        $invokeTmpNotifInj.Add("# Set by AutoPackager based on recipe NotificationPopup.Enabled")
+                        $invokeTmpNotifInj.Add("`$notificationPopupEnabled = $adtNotifEnabledStr3")
+                        $adtSessionVarInjected = $true
+                        $adtInSessionBlock = $false
+                    }
+                }
+                if ($invokeTmpNotifInj -and $invokeTmpNotifInj.Count -gt 0) { $invokeLines = $invokeTmpNotifInj.ToArray() }
+
+                # Wrap Show-ADTInstallationWelcome in if ($notificationPopupEnabled) blocks
+                $invokeTmpWrap = [System.Collections.Generic.List[string]]::new()
+                foreach ($adtL in $invokeLines) {
+                    if ($adtL -match '^\s*Show-ADTInstallationWelcome\b') {
+                        $adtLineIndent = ''
+                        if ($adtL -match '^(\s+)') { $adtLineIndent = $Matches[1] }
+                        $adtTrimmed = $adtL.TrimStart()
+                        $invokeTmpWrap.Add("${adtLineIndent}if (`$notificationPopupEnabled -or `$adtSession.AppProcessesToClose.Count -gt 0)")
+                        $invokeTmpWrap.Add("${adtLineIndent}{")
+                        $invokeTmpWrap.Add("${adtLineIndent}    ${adtTrimmed}")
+                        $invokeTmpWrap.Add("${adtLineIndent}}")
+                    } else {
+                        $invokeTmpWrap.Add($adtL)
+                    }
+                }
+                if ($invokeTmpWrap -and $invokeTmpWrap.Count -gt 0) { $invokeLines = $invokeTmpWrap.ToArray() }
+                Write-Log ("NotificationPopup wrapping applied to Invoke-AppDeployToolkit.ps1: notifEnabled={0}" -f $adtNotifEnabled3) 'INFO'
+
                 Write-Log ("Pre-write invokeLines count: {0}" -f @($invokeLines).Count) 'INFO'
                 if ($invokeLines -and @($invokeLines).Count -gt 0) {
                     Set-Content -LiteralPath $invokeAdtPath -Value $invokeLines -Encoding UTF8
