@@ -5076,9 +5076,13 @@ if ($cmp -le 0) {
                             $adtInstallLine = $null
                             $adtInstallerTypeLower = ''
                             try { $adtInstallerTypeLower = ([string]$installerType).ToLower().Trim() } catch {}
-                            # Also fallback to filename extension if InstallerType is not set
-                            if (-not $adtInstallerTypeLower -and $installerName -match '\.msi$') { $adtInstallerTypeLower = 'msi' }
-                            if (-not $adtInstallerTypeLower -and $installerName -match '\.exe$') { $adtInstallerTypeLower = 'exe' }
+                            # Normalize MSI-like and EXE-like Winget types; fall back to file extension for unknowns
+                            if ($adtInstallerTypeLower -in @('msi','wix')) { $adtInstallerTypeLower = 'msi' }
+                            elseif ($adtInstallerTypeLower -in @('exe','inno','nullsoft','nsis','burn','squirrel')) { $adtInstallerTypeLower = 'exe' }
+                            if (-not ($adtInstallerTypeLower -in @('msi','exe'))) {
+                                if ($installerName -match '\.msi$') { $adtInstallerTypeLower = 'msi' }
+                                elseif ($installerName -match '\.exe$') { $adtInstallerTypeLower = 'exe' }
+                            }
 
                             $adtInstallArgsEscaped = ''
                             try { if ($installArgsFromRecipe) { $adtInstallArgsEscaped = $installArgsFromRecipe.Trim().Replace("'","''") } } catch {}
@@ -5378,8 +5382,13 @@ if ($cmp -le 0) {
                 # Build uninstall line for injection
                 $adtInstallerTypeLower2 = ''
                 try { $adtInstallerTypeLower2 = ([string]$installerType).ToLower().Trim() } catch {}
-                if (-not $adtInstallerTypeLower2 -and $installerName -match '\.msi$') { $adtInstallerTypeLower2 = 'msi' }
-                if (-not $adtInstallerTypeLower2 -and $installerName -match '\.exe$') { $adtInstallerTypeLower2 = 'exe' }
+                # Normalize MSI-like and EXE-like Winget types; fall back to file extension for unknowns
+                if ($adtInstallerTypeLower2 -in @('msi','wix')) { $adtInstallerTypeLower2 = 'msi' }
+                elseif ($adtInstallerTypeLower2 -in @('exe','inno','nullsoft','nsis','burn','squirrel')) { $adtInstallerTypeLower2 = 'exe' }
+                if (-not ($adtInstallerTypeLower2 -in @('msi','exe'))) {
+                    if ($installerName -match '\.msi$') { $adtInstallerTypeLower2 = 'msi' }
+                    elseif ($installerName -match '\.exe$') { $adtInstallerTypeLower2 = 'exe' }
+                }
                 if ($adtVendor) {
                     $adtUninstallLine2 = "    Uninstall-ADTApplication -Name '$adtName' -ApplicationType '$adtInstallerTypeLower2' -FilterScript { `$_.Publisher -match '$adtVendor' }"
                 } else {
